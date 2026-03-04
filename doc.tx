@@ -1,0 +1,201 @@
+How it works
+1. Server boots (server.js)
+Starts a Next.js HTTP server on port 3000
+Starts a WebSocket server on port 3001
+Seeds 2800px of fake price history by running the simulation
+Calls consume_vrf on-chain → gets back randomness, computes which row the pointer should land on for each upcoming column (stored in vrfPath map)
+2. Pointer tick (every 33ms)
+serverCurrentX advances by 1px
+stepSim() moves simY (0–1, where 1=top, 0=bottom)
+steerTowardRow() nudges velocity toward the VRF-predetermined row for the current column — so the pointer naturally drifts toward the winning row
+When the pointer crosses into a new column, it records columnActualRow[prevColX] = actual row pointer was on
+Broadcasts { type: 'pointer', y, multiplier, currentX } to all WS clients
+3. User clicks a box (browser)
+StockGrid detects the click, fires a custom event sprmfun:select with { colX, row }
+GameHUD catches it, shows the bet modal
+4. Bet placement
+User confirms → handlePlaceBet runs:
+Encodes box_x as 8-byte little-endian for PDA seed
+Derives betPda = [b"bet", userPubkey, box_x_le8, box_row]
+Calls place_bet(box_x, box_row, amount) on-chain
+Transfers tokens from user ATA → escrow ATA
+Signs via Phantom, sends to localnet via sendRawTransaction
+After confirmed, POSTs to /register-bet (HTTP on port 3000)
+Server adds bet to pendingBets map: betPda → { betPda, user, box_x, box_row, userAta }
+5. Auto-resolve
+Every pointer tick, server checks: for each pending bet, if serverCurrentX >= bet.box_x + COLUMN_WIDTH → resolveBet()
+resolveBet() looks up columnActualRow[colX] — the row the pointer was actually on when it left that column
+Calls resolve_bet(winning_row) on-chain (authority signs)
+On-chain: if bet.box_row == winning_row → computes gross = amount × multiplier, takes 2% fee, transfers net to user ATA
+Broadcasts { type: 'bet_resolved', won, box_x, box_row, winning_row } to all WS clients
+Browser shows WIN/LOSE flash, balance updates
+6. VRF refresh (every ~8 columns)
+Server calls consume_vrf(newRandomness, newSalt) on-chain
+Pre-computes winning rows for next 8 columns using sha256(vrf || salt || colX)[0] % 10
+Broadcasts path_revealed to clients so they can highlight the VRF-winning row (gold tint)
+
+
+
+
+
+
+GameHUD.tsx:259 [BET] sig: 3cD7jKakVDFftoZpSVdof6rvj2NRLZpBmAFypfoVDj2VL3NP1J6t1f9YJfpHysE6DK8YUui49vHUWa7bmvyBZH9R
+GameHUD.tsx:273 [BET] poll 0  status=confirmed
+GameHUD.tsx:295 [BET] register_bet sent to server?
+
+
+[PTR #4351]  x=7151  y=0.5885  mult=1.5×  vrfRow=0
+[PTR #4381]  x=7181  y=0.9198  mult=10×  vrfRow=0
+[PTR #4411]  x=7211  y=0.9500  mult=10×  vrfRow=0
+[PTR #4441]  x=7241  y=0.9424  mult=10×  vrfRow=0
+[PTR #4471]  x=7271  y=0.9500  mult=10×  vrfRow=0
+[COL] crossed colX=7140  actualRow=0  y=0.9467
+[PTR #4501]  x=7301  y=0.8903  mult=5×  vrfRow=1
+[PTR #4531]  x=7331  y=0.8686  mult=5×  vrfRow=1
+[PTR #4561]  x=7361  y=0.8607  mult=5×  vrfRow=1
+[PTR #4591]  x=7391  y=0.8704  mult=5×  vrfRow=1
+[COL] crossed colX=7280  actualRow=0  y=0.9121
+[PTR #4621]  x=7421  y=0.8993  mult=5×  vrfRow=2
+[PTR #4651]  x=7451  y=0.7415  mult=3×  vrfRow=2
+[PTR #4681]  x=7481  y=0.7236  mult=3×  vrfRow=2
+[PTR #4711]  x=7511  y=0.7141  mult=3×  vrfRow=2
+[PTR #4741]  x=7541  y=0.7199  mult=3×  vrfRow=2
+[COL] crossed colX=7420  actualRow=2  y=0.7667
+[PTR #4771]  x=7571  y=0.6305  mult=2×  vrfRow=4
+[PTR #4801]  x=7601  y=0.5415  mult=1.5×  vrfRow=4
+[PTR #4831]  x=7631  y=0.5750  mult=1.5×  vrfRow=4
+[PTR #4861]  x=7661  y=0.5538  mult=1.5×  vrfRow=4
+[PTR #4891]  x=7691  y=0.5082  mult=1.5×  vrfRow=4
+[COL] crossed colX=7560  actualRow=4  y=0.5269
+[PTR #4921]  x=7721  y=0.4161  mult=1×  vrfRow=5
+[PTR #4951]  x=7751  y=0.4008  mult=1×  vrfRow=5
+[PTR #4981]  x=7781  y=0.4236  mult=1×  vrfRow=5
+[PTR #5011]  x=7811  y=0.4236  mult=1×  vrfRow=5
+[COL] crossed colX=7700  actualRow=5  y=0.4268
+[PTR #5041]  x=7841  y=0.4161  mult=1×  vrfRow=5
+[PTR #5071]  x=7871  y=0.4536  mult=1×  vrfRow=5
+[PTR #5101]  x=7901  y=0.5013  mult=1.5×  vrfRow=5
+[PTR #5131]  x=7931  y=0.4845  mult=1×  vrfRow=5
+[PTR #5161]  x=7961  y=0.4807  mult=1×  vrfRow=5
+[COL] crossed colX=7840  actualRow=5  y=0.4357
+[PTR #5191]  x=7991  y=0.4572  mult=1×  vrfRow=5
+[PTR #5221]  x=8021  y=0.3964  mult=0.75×  vrfRow=5
+[PTR #5251]  x=8051  y=0.4417  mult=1×  vrfRow=5
+[BET] Registered via HTTP: CGE9FCJ5… box_x=8260 row=7
+[PTR #5281]  x=8081  y=0.3902  mult=0.75×  vrfRow=5
+[PTR #5311]  x=8111  y=0.4763  mult=1×  vrfRow=5
+[COL] crossed colX=7980  actualRow=5  y=0.4858
+[VRF] consume_vrf OK  seed_index=6
+[VRF] paths populated for colX 8400–9380
+[PTR #5341]  x=8141  y=0.2399  mult=0.5×  vrfRow=8
+[PTR #5371]  x=8171  y=0.1836  mult=0.25×  vrfRow=8
+[PTR #5401]  x=8201  y=0.1303  mult=0.25×  vrfRow=8
+[PTR #5431]  x=8231  y=0.1668  mult=0.25×  vrfRow=8
+[COL] crossed colX=8120  actualRow=8  y=0.1692
+[PTR #5461]  x=8261  y=0.1818  mult=0.25×  vrfRow=1
+[PTR #5491]  x=8291  y=0.5494  mult=1.5×  vrfRow=1
+[PTR #5521]  x=8321  y=0.8708  mult=5×  vrfRow=1
+[PTR #5551]  x=8351  y=0.8414  mult=5×  vrfRow=1
+[PTR #5581]  x=8381  y=0.8406  mult=5×  vrfRow=1
+[COL] crossed colX=8260  actualRow=1  y=0.8704
+[BET] Pointer passed box_x=8260 (serverCurrentX=8400) → triggering resolve
+[BET] Attempting resolve: betPda=CGE9FCJ5… box_x=8260 colX=8260 betRow=7 winRow=1
+[BET] Calling resolve_bet on-chain: winRow=1 betRow=7 → LOSE
+[BET] ✓ Resolved: CGE9FCJ5… box_x=8260 betRow=7 winRow=1 → ✗ LOSE
+[PTR #5611]  x=8411  y=0.7481  mult=3×  vrfRow=2
+[PTR #5641]  x=8441  y=0.7596  mult=3×  vrfRow=2
+[PTR #5671]  x=8471  y=0.7810  mult=3×  vrfRow=2
+[PTR #5701]  x=8501  y=0.7692  mult=3×  vrfRow=2
+[PTR #5731]  x=8531  y=0.7180  mult=3×  vrfRow=2
+[COL] crossed colX=8400  actualRow=3  y=0.6916
+[PTR #5761]  x=8561  y=0.4372  mult=1×  vrfRow=9
+[PTR #5791]  x=8591  y=0.0918  mult=0.1×  vrfRow=9
+[PTR #5821]  x=8621  y=0.1127  mult=0.25×  vrfRow=9
+[PTR #5851]  x=8651  y=0.0514  mult=0.1×  vrfRow=9
+[COL] crossed colX=8540  actualRow=9  y=0.0912
+[PTR #5881]  x=8681  y=0.0974  mult=0.1×  vrfRow=8
+[PTR #5911]  x=8711  y=0.0888  mult=0.1×  vrfRow=8
+[PTR #5941]  x=8741  y=0.1256  mult=0.25×  vrfRow=8
+[PTR #5971]  x=8771  y=0.1384  mult=0.25×  vrfRow=8
+[PTR #6001]  x=8801  y=0.1633  mult=0.25×  vrfRow=8
+[COL] crossed colX=8680  actualRow=8  y=0.1316
+[PTR #6031]  x=8831  y=0.1753  mult=0.25×  vrfRow=7
+[PTR #6061]  x=8861  y=0.2846  mult=0.5×  vrfRow=7
+[PTR #6091]  x=8891  y=0.2540  mult=0.5×  vrfRow=7
+[PTR #6121]  x=8921  y=0.2530  mult=0.5×  vrfRow=7
+[PTR #6151]  x=8951  y=0.2351  mult=0.5×  vrfRow=7
+[COL] crossed colX=8820  actualRow=6  y=0.3016
+[PTR #6181]  x=8981  y=0.5563  mult=1.5×  vrfRow=2
+[PTR #6211]  x=9011  y=0.7265  mult=3×  vrfRow=2
+[PTR #6241]  x=9041  y=0.7509  mult=3×  vrfRow=2
+[PTR #6271]  x=9071  y=0.7544  mult=3×  vrfRow=2
+[COL] crossed colX=8960  actualRow=2  y=0.7614
+[PTR #6301]  x=9101  y=0.7489  mult=3×  vrfRow=9
+[PTR #6331]  x=9131  y=0.3854  mult=0.75×  vrfRow=9
+
+
+
+it passed still i didnt win
+The bet was on row 7, but the pointer was on row 1 when it crossed that column — so it correctly resolved as a LOSE. You need to bet on the row the pointer actually lands on.
+
+Look at the gold-highlighted row in the grid — that's where the VRF is steering the pointer. The vrfRow in the logs tells you exactly which row the pointer is being steered toward for each column. Bet on that row.
+
+For example from your logs:
+
+
+[COL] crossed colX=8260  actualRow=1
+The vrfRow for colX 8260 was showing 1 in the PTR logs just before — so if you had bet row 1 on that column, you would have won.
+
+The gold-tinted boxes in the grid are the VRF-predicted winning rows. Bet on those.
+
+wait see in the pic , ithe pointer has moved over it , u gotta count those also
+You're right — the winning row should be determined by where the pointer was during the entire time it was in that column, not just the moment it exits. Right now we only record the row at the exit moment.
+
+But actually the bigger issue with your picture is different — look at the screenshot: the pointer passed through the 3x box (row 7 from top, which is row 2 in 0-indexed from bottom). The gold box shows the VRF-predicted row.
+
+The real question is: what counts as "winning"? Currently: the row at column exit. Should it be: the row the pointer was on for most time in the column? Or any row it touched?
+
+Which do you want?
+
+AskUserQuestion
+OUT
+User has answered your questions: "What should determine the winning row for a column?"="as this thing stahd there cna be multiple rows winning , every row the pointer passes". You can now continue with the user's answers in mind.
+Got it — every row the pointer passes through in a column wins. So if the pointer enters at row 2 and exits at row 7, rows 2, 3, 4, 5, 6, 7 all win.
+
+This means instead of a single winning_row, we need a set of winning rows per column. The on-chain resolve_bet just needs to check if bet.box_row is in that set.
+
+The simplest representation: a bitmask (10 rows → fits in a u16). Let me update the contract and server:
+
+Read server.js (lines 104-115)
+Read server.js (lines 326-345)
+Now I need to:
+
+Track all rows visited per column (min/max range, since pointer moves continuously)
+Change resolve_bet to accept a bitmask of winning rows
+Update the contract to check bitmask instead of single row
+Let me do it all:
+
+Edit server.js
+Added 1 line
+You've hit your limit · resets 4:30am (Asia/Calcutta)
+
+
+
+
+
+DEVNET 
+
+Authority:    Exy14fYLBVGjdxHSzh79UPjG8BTHhBBn6m3gMPspKJL3
+State PDA:    BfVnPhHMPxD38wUwJRKtqcZcvNTWcWjnnhM2kcJcQoCW
+Mint PDA:     FkMjyjkVRcvvAX92DWAYAg8taRe3m2GUM9EJ8mzyeCyy
+Escrow ATA:   E9f5aJ3pamqc61ctAzqrCKd4doM7Gkf8BiUXzMQZTf4E
+Treasury ATA: 7wT863sJ7Cn4E5BgqkcU9ixXFXAcu9SZY8Nptvp3i6Yt
+
+✓ State PDA already exists — skipping initialize
+Step 2: calling init_atas...
+  ✓ init_atas tx: 3GKZxZdKbj6h5tMji6g9skNKYWYy1xEvexqrgy6YehfqjQMeyA4UgEhn1xV33Xe4QheGqZPSYwks7gu3VxQ6vjQr
+
+=== Devnet init complete ===
+Program:     https://explorer.solana.com/address/BN8y2gfrrVe1Nira9R9PtN6BzfuyKjQZ1LyoXUT3yJfw?cluster=devnet
+State PDA:   https://explorer.solana.com/address/BfVnPhHMPxD38wUwJRKtqcZcvNTWcWjnnhM2kcJcQoCW?cluster=devnet
+Escrow ATA:  https://explorer.solana.com/address/E9f5aJ3pamqc61ctAzqrCKd4doM7Gkf8BiUXzMQZTf4E?cluster=devnet

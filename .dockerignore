@@ -1,0 +1,12 @@
+.git
+.next
+node_modules
+.env
+.anchor
+test-ledger
+sprmfun-anchor/target/deploy
+sprmfun-anchor/target/debug
+sprmfun-anchor/target/release
+*.rs.bk
+.DS_Store
+.claude

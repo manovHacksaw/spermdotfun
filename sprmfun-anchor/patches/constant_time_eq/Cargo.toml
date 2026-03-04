@@ -1,0 +1,6 @@
+[package]
+name    = "constant_time_eq"
+version = "0.4.2"
+edition = "2021"
+license = "CC0-1.0"
+description = "Shim of constant_time_eq 0.4.2 compatible with Rust < 1.85"
