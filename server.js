@@ -9,7 +9,6 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { createProfileService } = require("./lib/server/profile-service");
-const { createVaultService } = require("./lib/server/vault-service");
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -49,7 +48,7 @@ const GAME_ABI = [
   "function resolveBet(uint256 betId, bool won, bytes calldata serverSig) external",
   "function requestVrf() external returns (uint256 requestId)",
   "function isVrfPending() external view returns (bool)",
-  "event BetPlaced(uint256 indexed betId, address indexed player, uint32 boxX, uint8 boxRow, uint16 multNum, uint256 amount)",
+  "event BetPlaced(uint256 indexed betId, address indexed player, uint32 boxX, uint16 boxRow, uint16 multNum, uint256 amount)",
   "event BetResolved(uint256 indexed betId, address indexed player, bool won, uint256 payout)",
   "event VrfFulfilled(uint256 indexed epochId, uint256 indexed requestId, bytes32 vrfResult)",
   "event VrfRequested(uint256 indexed epochId, uint256 indexed requestId)",
@@ -58,7 +57,6 @@ const GAME_ABI = [
 let evmProvider = null;
 let serverWallet = null;
 let gameContract = null;
-let vaultService = null;
 let onchainReady = false;
 
 function initEvm() {
@@ -79,26 +77,9 @@ function initEvm() {
   serverWallet = new ethers.Wallet(privateKey, evmProvider);
   gameContract = new ethers.Contract(GAME_ADDRESS, GAME_ABI, serverWallet);
 
-  vaultService = createVaultService({
-    logger: console,
-    serverWallet,
-    domain: {
-      name: "SprmVault",
-      version: "1",
-      chainId: 43113,
-      verifyingContract: GAME_ADDRESS,
-    },
-  });
 
   onchainReady = true;
   console.log(`[EVM] Connected — wallet=${serverWallet.address} contract=${GAME_ADDRESS}`);
-
-  // Listen for deposits to initialize/update vault balances
-  gameContract.on("Deposited", (user, amount) => {
-    if (vaultService) {
-      vaultService.handleDeposit(user, amount);
-    }
-  });
 }
 
 const profileService = createProfileService({
@@ -152,7 +133,7 @@ function weightedDelta(byte) {
   return 4;
 }
 
-let lastWinRow = 5; // tracks previous winning row for smooth transitions
+let lastWinRow = 250; // tracks previous winning row for smooth transitions
 
 // (server_salt removed — oracle randomness is self-verifying)
 function deriveWinningRow(vrfResult, boxX) {
@@ -166,12 +147,12 @@ function deriveWinningRow(vrfResult, boxX) {
   let delta = weightedDelta(hash[0]);
   // Boundary repulsion: closer to edge → stronger push back toward center.
   // Row 9 = top of screen (low y), row 0 = bottom (high y). Center = rows 4–5.
-  // At row 9 → bias toward lower row numbers; at row 0 → bias toward higher row numbers.
-  const distFromCenter = lastWinRow - 4.5; // positive = near row 9 (top), negative = near row 0 (bottom)
-  const biasMag = Math.round(Math.abs(distFromCenter) * 0.7); // 0 at center, ~3 at edges
+  // In 500 row grid, center is 250.
+  const distFromCenter = lastWinRow - 250;
+  const biasMag = Math.round(Math.abs(distFromCenter) * 0.7);
   const bias = -Math.sign(distFromCenter) * biasMag; // push toward center
   delta = Math.max(-4, Math.min(4, delta + bias));
-  const row = Math.max(0, Math.min(29, lastWinRow + delta));
+  const row = Math.max(0, Math.min(499, lastWinRow + delta));
   lastWinRow = row;
   return row;
 }
@@ -183,7 +164,7 @@ const vrfPath = new Map();
 let currentAvaxPrice = 0;
 let lastPrice = 0;
 let priceBaseline = 0;
-const PRICE_CHAOS_FACTOR = 450.0; // High amplification for micro-movements
+const PRICE_CHAOS_FACTOR = 150.0; // Reduced amplification for smoother movements
 const FRICTION = 0.94;           // Drag to prevent infinite sliding
 const MOMENTUM_INERTIA = 0.12;   // How much price affects velocity
 
@@ -219,7 +200,7 @@ function initBinance() {
 }
 
 // ── Simulation state ────────────────────────────────────────────────────────────
-let simY = 0.5;
+let simY = 0.0;
 let simVelocity = 0;
 let simTime = 0;
 
@@ -256,11 +237,11 @@ function stepSim() {
     }
 
     // Centering force to prevent it from hugging the edges forever
-    const bias = (0.5 - simY) * 0.005;
+    const bias = (0.0 - simY) * 0.005;
     simY += bias;
 
-    // Hard clamps for the canvas bounds
-    simY = Math.max(0.04, Math.min(0.96, simY));
+    // Hard clamps significantly relaxed for "infinite" feel
+    simY = Math.max(-50, Math.min(50, simY));
 
     return { y: simY };
   }
@@ -275,14 +256,14 @@ function stepSim() {
   simVelocity = simVelocity * 0.93 + noise + trend + shock + spring;
   simVelocity = Math.max(-0.025, Math.min(0.025, simVelocity));
   simY += simVelocity;
-  if (!steerActive) simY += (0.5 - simY) * 0.002;
-  simY = Math.max(0.02, Math.min(0.98, simY));
+  if (!steerActive) simY += (0.0 - simY) * 0.001;
+  simY = Math.max(-50, Math.min(50, simY));
   return { y: simY };
 }
 
 function steerTowardRow(targetRow, curColX, currentX) {
-  // box.row convention: row 0 = bottom, row 29 = top
-  const newTargetY = (targetRow + 0.5) / 30;
+  // box.row convention: y=0 is at center-ish (row 250), but we'll use raw row index
+  const newTargetY = (targetRow - 250) / 30;
   // Only update target when entering a new column
   if (Math.abs(newTargetY - steerTargetY) > 0.001 || !steerActive) {
     steerTargetY = newTargetY;
@@ -551,13 +532,6 @@ async function resolveBet(betKey) {
     try {
       const winAmount = BigInt(Math.floor(payout));
       const betAmount = BigInt(info.bet_amount);
-      const delta = won ? winAmount : -betAmount;
-
-      if (vaultService) {
-        vaultService.updateBalance(info.user, delta);
-        console.log(`[VAULT] Resolved off-chain: user=${info.user} won=${won} delta=${delta}`);
-      }
-
       // ── On-chain fallback (optional/debug) ──────────────────────────────
       if (onchainReady && gameContract && info.betId) {
         try {
@@ -577,10 +551,7 @@ async function resolveBet(betKey) {
           console.error("[BET] on-chain resolveBet failed:", onChainErr.message);
         }
       }
-
       // ── Broadcast to user ───────────────────────────────────────────────
-      const vaultBal = vaultService ? vaultService.getBalance(info.user) : 0n;
-
       broadcast(JSON.stringify({
         type: "bet_resolved",
         betPda: betKey,
@@ -588,7 +559,6 @@ async function resolveBet(betKey) {
         won,
         payout,
         txHash, // This will be null if only off-chain, or the hash if on-chain
-        vaultBalance: ethers.formatEther(vaultBal), // Return as human-readable string
         box_x: info.box_x,
         box_row: info.box_row,
       }));
@@ -662,7 +632,7 @@ function makeColumns(count) {
   for (let i = 0; i < count; i++) {
     gridIdCounter++;
     const colBoxes = [];
-    for (let r = 0; r < 30; r++) {
+    for (let r = 0; r < 500; r++) {
       const m = randomMult();
       colBoxes.push({
         id: `b${gridIdCounter}-${r}`,
@@ -1079,9 +1049,9 @@ app.prepare().then(async () => {
     historyBuffer.push({ x: serverCurrentX, y });
     if (historyBuffer.length > HISTORY_SIZE) historyBuffer.shift();
 
-    // tickRow must match box.row convention (row 0=bottom, row 29=top).
-    // serverY = (row + 0.5)/30, so row = floor(y * 30).
-    const tickRow = Math.max(0, Math.min(29, Math.floor(y * 30)));
+    // tickRow must match box.row convention (row 0=bottom, row 999=top).
+    // Mapping: y=0 maps to row 500. Each 1.0 y units is 30 rows.
+    const tickRow = Math.max(0, Math.min(999, Math.floor(y * 30) + 500));
     const existing = columnRowRange.get(curColX);
     if (!existing) {
       columnRowRange.set(curColX, { minRow: tickRow, maxRow: tickRow });
@@ -1286,21 +1256,6 @@ app.prepare().then(async () => {
               if (msg.user) lookupNickname(msg.user);
               broadcastActivePlayers();
             }
-          }
-        } else if (msg.type === "request_vault_balance") {
-          if (vaultService && msg.user) {
-            const bal = vaultService.getBalance(msg.user);
-            ws.send(JSON.stringify({
-              type: "vault_balance",
-              user: msg.user,
-              balance: ethers.formatEther(bal)
-            }));
-          }
-        } else if (msg.type === "request_settle") {
-          if (vaultService && msg.user) {
-            vaultService.generateSettlementProof(msg.user)
-              .then(proof => ws.send(JSON.stringify({ type: "settlement_proof", ...proof })))
-              .catch(err => ws.send(JSON.stringify({ type: "settlement_error", error: err.message })));
           }
         }
       } catch (e) {

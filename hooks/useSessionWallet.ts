@@ -66,8 +66,6 @@ export function useSessionWallet(): SessionWalletState {
   const [activeWallet, setActiveWalletState] = useState<ActiveWallet>('primary')
   // Optimistic override for balance display (set after a bet, cleared on next real refresh)
   const [optimisticBalance, setOptimisticBalance] = useState<number | null>(null)
-  // Off-chain balance from VaultService
-  const [vaultBalance, setVaultBalance] = useState<number | null>(null)
 
   const sessionAddress = sessionWallet?.address ?? null
 
@@ -80,10 +78,10 @@ export function useSessionWallet(): SessionWalletState {
   )
 
   // Merge source of truth: 
-  // - If instant wallet: optimistic > vault (off-chain) > raw (on-chain)
+  // - If instant wallet: optimistic > raw (on-chain)
   // - If primary wallet: raw (on-chain)
   const sessionSprmBalance = (activeWallet === 'instant')
-    ? (optimisticBalance !== null ? optimisticBalance : (vaultBalance !== null ? vaultBalance : rawSessionBalance))
+    ? (optimisticBalance !== null ? optimisticBalance : rawSessionBalance)
     : rawSessionBalance
 
   // Clear optimistic override whenever a real balance poll arrives
@@ -146,9 +144,6 @@ export function useSessionWallet(): SessionWalletState {
       try {
         const data = (evt as CustomEvent).detail
         if (data?.user === sessionAddress) {
-          if (data.vaultBalance !== undefined) {
-            setVaultBalance(parseFloat(data.vaultBalance))
-          }
           await new Promise(r => setTimeout(r, 800))
           setOptimisticBalance(null)
           await refreshSessionBalance()
@@ -167,18 +162,10 @@ export function useSessionWallet(): SessionWalletState {
       } catch { /* ignore */ }
     }
 
-    const onVaultBalance = (evt: Event) => {
-      const data = (evt as CustomEvent).detail
-      if (data?.user === sessionAddress) {
-        setVaultBalance(parseFloat(data.balance))
-      }
-    }
-
     window.addEventListener('sprmfun:betresult', onBetResult as EventListener)
-    window.addEventListener('sprmfun:vault_balance', onVaultBalance as EventListener)
+    window.addEventListener('sprmfun:betresolvefailed', onResolveFailed as EventListener)
     return () => {
       window.removeEventListener('sprmfun:betresult', onBetResult as EventListener)
-      window.removeEventListener('sprmfun:vault_balance', onVaultBalance as EventListener)
       window.removeEventListener('sprmfun:betresolvefailed', onResolveFailed as EventListener)
     }
   }, [sessionAddress, refreshSessionBalance])

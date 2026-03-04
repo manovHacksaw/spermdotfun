@@ -6,10 +6,12 @@ import { useSessionWalletContext } from '@/context/SessionWalletContext'
 import { spermTheme } from '@/components/theme/spermTheme'
 
 // ── Layout constants ────────────────────────────────────────────────────────────
-const COLUMN_WIDTH = 50
-const ROW_COUNT = 30
+const COLUMN_WIDTH_BASE = 50
+const ROW_HEIGHT_BASE = 45 // Base row height
+const ROW_COUNT = 500
 const POINTER_LEFT_FRAC = 0.30
 const MAX_HISTORY = 4000
+const PRICE_AXIS_WIDTH = 60
 
 
 // ── Colour palette ──────────────────────────────────────────────────────────────
@@ -94,7 +96,8 @@ export default function StockGrid() {
     ghostAll: new Map<string, Set<string>>(),   // key → Set<shortAddr>
     ghostVisible: new Map<string, number>(),         // key → ghost color index (0–4)
     currentPrice: 0,
-    lerpY: 0.5, // Client-side interpolated Y for smoothness
+    lerpY: 0.0, // Client-side interpolated Y for smoothness
+    zoom: 1.0,
   })
 
   // ── Resize ──────────────────────────────────────────────────────────────────
@@ -109,7 +112,19 @@ export default function StockGrid() {
   }
 
   function yToRow(ny: number): number {
-    return Math.max(0, Math.min(ROW_COUNT - 1, ROW_COUNT - 1 - Math.floor(ny * ROW_COUNT)))
+    // ny=0 is at row 250 (center)
+    // ny * 30 is the row offset from center.
+    return Math.floor(ny * 30) + 250
+  }
+
+  function rowToPrice(row: number): string {
+    const s = state.current
+    if (s.currentPrice === 0) return `ROW ${row}`
+    // Basic linear mapping for axis labels.
+    // In a real app, this should match the server's price-to-Y mapping.
+    // The server uses simY = (row-250)/30 roughly.
+    // Let's just show the row index for now, or a mock price calculation.
+    return `$${(s.currentPrice * (1 + (row - 250) * 0.0001)).toFixed(6)}`
   }
 
   // ── Draw ─────────────────────────────────────────────────────────────────────
@@ -123,9 +138,18 @@ export default function StockGrid() {
     const W = s.W, H = s.H
     if (!W || !H) return
 
-    const rowH = H / ROW_COUNT
+    const zoom = s.zoom
+    const colW = COLUMN_WIDTH_BASE * zoom
+    const rowH = ROW_HEIGHT_BASE * zoom
+
+    // Viewport calculation
     const rightMargin = Math.round(W * (1 - POINTER_LEFT_FRAC))
-    const viewX = s.currentX - (W - rightMargin)
+    const viewX = s.currentX * zoom - (W - rightMargin)
+
+    // Vertical Camera logic: follow the interpolated pointer Y
+    const ptrWorldY = (s.lerpY * 30) * rowH + (250 * rowH)
+    const viewY = ptrWorldY - (H / 2)
+
     const now = Date.now()
     const roundRadius = Math.min(10, rowH * 0.34)
 
@@ -134,14 +158,40 @@ export default function StockGrid() {
       ctx.roundRect(x, y, w, h, radius)
     }
 
-    const curColX = Math.floor(s.currentX / COLUMN_WIDTH) * COLUMN_WIDTH
+    const curColX = Math.floor(s.currentX / COLUMN_WIDTH_BASE) * COLUMN_WIDTH_BASE
     const curRow = s.lastPtr ? yToRow(s.lastPtr.y) : -1
 
     // 1. Background
     ctx.fillStyle = C.bg
     ctx.fillRect(0, 0, W, H)
 
-    // 2. Grid lines — (structural lines hidden)
+    // 2. Cyber Mesh Grid
+    ctx.save()
+    ctx.lineWidth = 0.5
+    // Horizontal lines relative to viewY
+    const firstRowVisible = Math.floor(viewY / rowH)
+    const lastRowVisible = Math.ceil((viewY + H) / rowH)
+
+    for (let r = firstRowVisible; r <= lastRowVisible; r++) {
+      const y = r * rowH - viewY
+      const opacity = r % 5 === 0 ? 0.08 : 0.03
+      ctx.strokeStyle = `rgba(212, 170, 255, ${opacity})`
+      ctx.beginPath()
+      ctx.moveTo(PRICE_AXIS_WIDTH, y)
+      ctx.lineTo(W, y)
+      ctx.stroke()
+    }
+    // Vertical lines (at column boundaries)
+    for (const col of s.columns) {
+      const sx = col.x * zoom - viewX
+      if (sx < PRICE_AXIS_WIDTH || sx > W) continue
+      ctx.strokeStyle = `rgba(212, 170, 255, 0.03)`
+      ctx.beginPath()
+      ctx.moveTo(sx, 0)
+      ctx.lineTo(sx, H)
+      ctx.stroke()
+    }
+    ctx.restore()
 
 
     // 3. Per-column content
@@ -150,16 +200,20 @@ export default function StockGrid() {
     const hovBox = s.hoverBox
 
     for (const col of s.columns) {
-      const sx = col.x - viewX
-      if (sx < -COLUMN_WIDTH || sx > W + COLUMN_WIDTH) continue
+      const sx = col.x * zoom - viewX
+      if (sx < PRICE_AXIS_WIDTH - colW || sx > W + colW) continue
       if (!s.renderedCols.has(col.id)) s.renderedCols.add(col.id)
 
       const visited = s.visitedCols.get(col.x)
+      const curColX = Math.floor(s.currentX / 50) * 50
       const isCurrent = col.x === curColX
-      const isSelectable = col.x > curColX + (COLUMN_WIDTH * 10)   // block 10 columns ahead for safety
-      for (let r = 0; r < ROW_COUNT; r++) {
-        const boxTop = (ROW_COUNT - 1 - r) * rowH
-        const mult = col.boxes[r]?.multiplier ?? 1.5
+      const isSelectable = col.x > curColX + (50 * 10)   // block 10 columns ahead for safety
+
+      for (let r = firstRowVisible; r <= lastRowVisible; r++) {
+        if (r < 0 || r >= ROW_COUNT) continue
+        const boxTop = r * rowH - viewY
+        const boxData = col.boxes[r]
+        const mult = boxData?.multiplier ?? 1.5
         const selKey = `${col.x}_${r}`
         const sel = sels.get(selKey)
         const isPending = sel?.result === 'pending'
@@ -186,7 +240,7 @@ export default function StockGrid() {
             const borderAlpha = isExactRow ? 0.75 : isCurrent ? 0.42 : Math.min(0.34, alpha * 0.30)
 
             ctx.fillStyle = C.pastBox + fillAlpha.toFixed(2) + ')'
-            drawRoundedRect(sx + 1.5, boxTop + 1.5, COLUMN_WIDTH - 3, rowH - 3, roundRadius)
+            drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
             ctx.fill()
 
             ctx.strokeStyle = isExactRow
@@ -195,14 +249,14 @@ export default function StockGrid() {
                 ? `rgba(197,140,255,${borderAlpha.toFixed(2)})`
                 : `rgba(245,245,242,${borderAlpha.toFixed(2)})`
             ctx.lineWidth = isExactRow ? 1.8 : 1.2
-            drawRoundedRect(sx + 1.5, boxTop + 1.5, COLUMN_WIDTH - 3, rowH - 3, roundRadius)
+            drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
             ctx.stroke()
 
             ctx.fillStyle = isExactRow ? C.multActive : C.multMid
-            ctx.font = isExactRow ? `600 13px Inter, sans-serif` : `500 12px Inter, sans-serif`
+            ctx.font = isExactRow ? `800 ${13 * zoom}px 'Outfit', sans-serif` : `600 ${12 * zoom}px 'Outfit', sans-serif`
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
-            ctx.fillText(`${mult}×`, sx + COLUMN_WIDTH / 2, boxTop + rowH / 2)
+            ctx.fillText(`${mult}×`, sx + colW / 2, boxTop + rowH / 2)
             ctx.textBaseline = 'alphabetic'
             drewYellow = true
             if (!sel) continue
@@ -217,13 +271,13 @@ export default function StockGrid() {
             ctx.fillStyle = sel.result === 'win'
               ? `rgba(152,214,194,${(alpha * 0.22).toFixed(2)})`
               : `rgba(227,150,170,${(alpha * 0.22).toFixed(2)})`
-            drawRoundedRect(sx + 1.5, boxTop + 1.5, COLUMN_WIDTH - 3, rowH - 3, roundRadius)
+            drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
             ctx.fill()
             ctx.strokeStyle = sel.result === 'win'
               ? `rgba(152,214,194,${(alpha * 0.84).toFixed(2)})`
               : `rgba(227,150,170,${alpha.toFixed(2)})`
             ctx.lineWidth = 1.8
-            drawRoundedRect(sx + 1.5, boxTop + 1.5, COLUMN_WIDTH - 3, rowH - 3, roundRadius)
+            drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
             ctx.stroke()
           }
           continue
@@ -233,12 +287,12 @@ export default function StockGrid() {
         if (isPending) {
           const pulse = (Math.sin(now / 200) + 1) / 2
           ctx.fillStyle = C.selFill
-          drawRoundedRect(sx + 1.5, boxTop + 1.5, COLUMN_WIDTH - 3, rowH - 3, roundRadius)
+          drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
           ctx.fill()
 
           ctx.strokeStyle = `rgba(197, 140, 255, ${0.45 + pulse * 0.45})`
           ctx.lineWidth = 1.8 + pulse * 0.8
-          drawRoundedRect(sx + 1.5, boxTop + 1.5, COLUMN_WIDTH - 3, rowH - 3, roundRadius)
+          drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
           ctx.stroke()
 
           // Selection glow
@@ -250,10 +304,10 @@ export default function StockGrid() {
           ctx.shadowColor = spermTheme.accentGlow
           ctx.shadowBlur = 8
           ctx.fillStyle = C.multActive
-          ctx.font = `600 12px Inter, sans-serif`
+          ctx.font = `800 ${12 * zoom}px 'Outfit', sans-serif`
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillText(`${mult}×`, sx + COLUMN_WIDTH / 2, boxTop + rowH / 2)
+          ctx.fillText(`${mult}×`, sx + colW / 2, boxTop + rowH / 2)
           ctx.restore()
           ctx.textBaseline = 'alphabetic'
           continue
@@ -262,20 +316,20 @@ export default function StockGrid() {
         // Hover in selectable zone
         if (isHovered && isSelectable) {
           ctx.fillStyle = C.hoverFill
-          drawRoundedRect(sx + 1.5, boxTop + 1.5, COLUMN_WIDTH - 3, rowH - 3, roundRadius)
+          drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
           ctx.fill()
           ctx.strokeStyle = C.hoverBorder
           ctx.lineWidth = 1.3
-          drawRoundedRect(sx + 1.5, boxTop + 1.5, COLUMN_WIDTH - 3, rowH - 3, roundRadius)
+          drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
           ctx.stroke()
           ctx.save()
           ctx.shadowColor = 'rgba(245,245,242,0.36)'
           ctx.shadowBlur = 6
           ctx.fillStyle = C.multMid
-          ctx.font = `600 11px Inter, sans-serif`
+          ctx.font = `600 ${11 * zoom}px Inter, sans-serif`
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillText(`${mult}×`, sx + COLUMN_WIDTH / 2, boxTop + rowH / 2)
+          ctx.fillText(`${mult}×`, sx + colW / 2, boxTop + rowH / 2)
           ctx.restore()
           ctx.textBaseline = 'alphabetic'
           continue
@@ -288,23 +342,20 @@ export default function StockGrid() {
           const ghostColorIdx = s.ghostVisible.get(selKey)
           if (ghostColorIdx !== undefined) {
             const gc = GHOST_COLORS[ghostColorIdx % GHOST_COLORS.length]
-            ctx.fillStyle = gc.fill
-            drawRoundedRect(sx + 1.5, boxTop + 1.5, COLUMN_WIDTH - 3, rowH - 3, roundRadius)
-            ctx.fill()
             ctx.strokeStyle = gc.border
             ctx.lineWidth = 1.2
             ctx.setLineDash([4, 3])
-            drawRoundedRect(sx + 1.5, boxTop + 1.5, COLUMN_WIDTH - 3, rowH - 3, roundRadius)
+            drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
             ctx.stroke()
             ctx.setLineDash([])
             ctx.save()
             ctx.shadowColor = gc.border
             ctx.shadowBlur = 4
             ctx.fillStyle = gc.text
-            ctx.font = `500 11px Inter, sans-serif`
+            ctx.font = `500 ${11 * zoom}px Inter, sans-serif`
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
-            ctx.fillText(`${mult}×`, sx + COLUMN_WIDTH / 2, boxTop + rowH / 2)
+            ctx.fillText(`${mult}×`, sx + colW / 2, boxTop + rowH / 2)
             ctx.restore()
             ctx.textBaseline = 'alphabetic'
             continue
@@ -317,15 +368,13 @@ export default function StockGrid() {
         ctx.shadowColor = isSelectable ? 'rgba(245,245,242,0.16)' : 'rgba(245,245,242,0.08)'
         ctx.shadowBlur = isSelectable ? 4 : 2
         ctx.fillStyle = multColor
-        ctx.font = isSelectable ? '600 11px Inter, sans-serif' : '500 11px Inter, sans-serif'
+        ctx.font = isSelectable ? `600 ${11 * zoom}px Inter, sans-serif` : `500 ${11 * zoom}px Inter, sans-serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
-        ctx.fillText(`${mult}×`, sx + COLUMN_WIDTH / 2, boxTop + rowH / 2)
+        ctx.fillText(`${mult}×`, sx + colW / 2, boxTop + rowH / 2)
         ctx.restore()
         ctx.textBaseline = 'alphabetic'
       }
-
-      // (Bottom edge dot hidden)
     }
 
     // 4. (History line hidden)
@@ -333,16 +382,16 @@ export default function StockGrid() {
 
     // 5. Pointer — sperm shape (anatomical head + fluid tail)
     const last2 = s.history[s.history.length - 1]
-    const dotX = last2.x - viewX
+    const dotX = last2.x * zoom - viewX
 
     // Smoothly interpolate the Y position on every frame
     const targetY = last2.y
     s.lerpY += (targetY - s.lerpY) * 0.15 // Adjust the speed of the "chase"
-    const dotY = s.lerpY * H
+    const dotY = (s.lerpY * 30 + 250) * rowH - viewY
 
     // Direction angle from previous LERP position
     const prev2 = s.history.length > 1 ? s.history[s.history.length - 2] : last2
-    const angle = Math.atan2((targetY - s.lerpY) * H * 10, (last2.x - prev2.x) || 1)
+    const angle = Math.atan2((targetY - s.lerpY) * 30 * rowH, (last2.x - prev2.x) * zoom || 1)
 
     ctx.save()
 
@@ -365,7 +414,7 @@ export default function StockGrid() {
     const t = Date.now() / 150
 
     // Turbulence: tail wiggles more when moving fast vertically
-    const turbulence = Math.min(1.5, Math.abs(targetY - s.lerpY) * 50)
+    const turbulence = Math.min(0.8, Math.abs(targetY - s.lerpY) * 10)
 
     const segs: { x0: number; y0: number; x1: number; y1: number; frac: number }[] = []
     for (let i = 0; i < TAIL_SEGS; i++) {
@@ -413,52 +462,58 @@ export default function StockGrid() {
       ctx.stroke()
     }
 
-    // anatomical head (egg-shaped)
+    // ── Cyber Orb Head ──
     ctx.translate(dotX, dotY)
     ctx.rotate(angle)
 
-    // Draw head using a Bezier curve for an "egg" shape (thicker at front)
-    const headW = 10, headH = 7.5
-    ctx.beginPath()
-    // Front (top of egg)
-    ctx.moveTo(headW, 0)
-    // Top curve
-    ctx.bezierCurveTo(headW, -headH, -headW * 0.5, -headH, -headW, 0)
-    // Bottom curve
-    ctx.bezierCurveTo(-headW * 0.5, headH, headW, headH, headW, 0)
-    ctx.closePath()
+    const headW = 10, headH = 8
 
-    // Dark envelope
-    ctx.fillStyle = 'rgba(16,12,26,0.95)'
+    // Outer refraction glow
+    const headGrd = ctx.createRadialGradient(2, 0, 0, 0, 0, 12)
+    headGrd.addColorStop(0, 'rgba(255,255,255,0.4)')
+    headGrd.addColorStop(0.6, 'rgba(212,170,255,0.15)')
+    headGrd.addColorStop(1, 'rgba(212,170,255,0)')
+
+    ctx.fillStyle = headGrd
+    ctx.beginPath()
+    ctx.ellipse(0, 0, 12, 10, 0, 0, Math.PI * 2)
     ctx.fill()
 
-    // Pearl body
-    ctx.save()
-    ctx.scale(0.85, 0.82)
+    // Sharp Cyber Shell
     ctx.beginPath()
     ctx.moveTo(headW, 0)
-    ctx.bezierCurveTo(headW, -headH, -headW * 0.5, -headH, -headW, 0)
-    ctx.bezierCurveTo(-headW * 0.5, headH, headW, headH, headW, 0)
+    ctx.bezierCurveTo(headW, -headH, -headW * 0.4, -headH, -headW, 0)
+    ctx.bezierCurveTo(-headW * 0.4, headH, headW, headH, headW, 0)
     ctx.closePath()
-    ctx.fillStyle = C.pointer
-    ctx.shadowColor = 'rgba(197,140,255,0.4)'
-    ctx.shadowBlur = 8
-    ctx.fill()
-    ctx.restore()
 
-    // Nucleus / internal detail
-    ctx.beginPath()
-    ctx.ellipse(2, 0, 3, 2.2, 0, 0, Math.PI * 2)
-    ctx.fillStyle = 'rgba(197,140,255,0.3)'
+    ctx.fillStyle = '#020205'
     ctx.fill()
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)'
-    ctx.lineWidth = 0.5
+    ctx.strokeStyle = 'rgba(212,170,255,0.6)'
+    ctx.lineWidth = 1.2
     ctx.stroke()
+
+    // Internal Core (Orb)
+    ctx.beginPath()
+    ctx.arc(2, 0, 4.5, 0, Math.PI * 2)
+    const coreGrd = ctx.createLinearGradient(-4, -4, 4, 4)
+    coreGrd.addColorStop(0, '#FFFFFF')
+    coreGrd.addColorStop(1, '#D4AAFF')
+    ctx.fillStyle = coreGrd
+    ctx.shadowColor = '#D4AAFF'
+    ctx.shadowBlur = 10
+    ctx.fill()
+    ctx.shadowBlur = 0
+
+    // Glossy highlight
+    ctx.beginPath()
+    ctx.ellipse(3, -2, 2, 1, Math.PI / 4, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(255,255,255,0.8)'
+    ctx.fill()
 
     ctx.restore()
 
     if (s.lastPtr) {
-      const lblW = 85, lblH = Math.min(rowH * 0.76, 26)
+      const lblW = 85, lblH = 26
       const lblX = dotX + 8
       const lblY = Math.max(2, Math.min(H - lblH - 2, dotY - lblH / 2))
       ctx.fillStyle = spermTheme.bgGlassStrong
@@ -476,10 +531,46 @@ export default function StockGrid() {
       ctx.textBaseline = 'alphabetic'
     }
 
+    // ── Price Axis (Left) ──
+    ctx.save()
+    ctx.fillStyle = 'rgba(10, 8, 20, 0.95)'
+    ctx.fillRect(0, 0, PRICE_AXIS_WIDTH, H)
+    ctx.strokeStyle = spermTheme.borderChrome
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(PRICE_AXIS_WIDTH, 0)
+    ctx.lineTo(PRICE_AXIS_WIDTH, H)
+    ctx.stroke()
+
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'middle'
+    ctx.font = '600 10px "JetBrains Mono", monospace'
+
+    for (let r = firstRowVisible; r <= lastRowVisible; r++) {
+      if (r < 0 || r >= ROW_COUNT) continue
+      const y = r * rowH - viewY
+      if (r % 5 === 0) {
+        ctx.fillStyle = spermTheme.textPrimary
+        ctx.fillText(rowToPrice(r), PRICE_AXIS_WIDTH - 8, y)
+        ctx.strokeStyle = 'rgba(212, 170, 255, 0.25)'
+        ctx.beginPath()
+        ctx.moveTo(PRICE_AXIS_WIDTH - 5, y)
+        ctx.lineTo(PRICE_AXIS_WIDTH, y)
+        ctx.stroke()
+      } else {
+        ctx.strokeStyle = 'rgba(212, 170, 255, 0.1)'
+        ctx.beginPath()
+        ctx.moveTo(PRICE_AXIS_WIDTH - 3, y)
+        ctx.lineTo(PRICE_AXIS_WIDTH, y)
+        ctx.stroke()
+      }
+    }
+    ctx.restore()
+
     // 6. Prediction Ghost Path (if hovering)
     if (s.hoverBox) {
-      const hX = s.hoverBox.colX + COLUMN_WIDTH / 2
-      const hY = H - (s.hoverBox.row + 0.5) * rowH
+      const hX = s.hoverBox.colX * zoom + colW / 2
+      const hY = s.hoverBox.row * rowH + rowH / 2 - viewY
 
       // Calculate a "predicted" curve from head to hover target
       const dx = hX - dotX
@@ -498,9 +589,9 @@ export default function StockGrid() {
 
       // Ghost target highlight
       ctx.fillStyle = 'rgba(197, 140, 255, 0.08)'
-      const hSX = hX - COLUMN_WIDTH / 2 - viewX
-      const hSY = H - (s.hoverBox.row + 1) * rowH
-      drawRoundedRect(hSX + 1.5, hSY + 1.5, COLUMN_WIDTH - 3, rowH - 3, roundRadius)
+      const hSX = hX - colW / 2 - viewX
+      const hSY = s.hoverBox.row * rowH - viewY
+      drawRoundedRect(hSX + 1.5, hSY + 1.5, colW - 3, rowH - 3, roundRadius)
       ctx.fill()
     }
 
@@ -528,7 +619,6 @@ export default function StockGrid() {
       ctx.fillStyle = '#fff'
       ctx.font = '700 14px "JetBrains Mono", monospace'
       ctx.textAlign = 'left'
-      ctx.textBaseline = 'middle'
       ctx.fillText(`$${s.currentPrice.toFixed(6)}`, badgeX + 28, badgeY + badgeH / 2)
 
       ctx.restore()
@@ -551,25 +641,15 @@ export default function StockGrid() {
         ctx.lineWidth = 1.6
         ctx.strokeRect(toastX + 1, toastY + 1, toastW - 2, toastH - 2)
         ctx.fillStyle = isWin ? spermTheme.success : spermTheme.error
-        ctx.font = `700 24px Inter, sans-serif`
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
         ctx.fillText(isWin ? '✓  WIN' : '✗  MISS', W / 2, toastY + toastH / 2)
         ctx.restore()
       }
     }
-
-    ctx.textBaseline = 'alphabetic'
-  }
+  } // This is the correct closing brace for the `draw` function.
 
   // ── Render loop ──────────────────────────────────────────────────────────────
   function loop() {
     try { draw() } catch (e) { console.error('[DRAW ERROR]', e) }
-    const s = state.current
-    if (s.lastPointerTime > 0 && Date.now() - s.lastPointerTime > 5000) {
-      console.warn(`[POINTER STALL] No pointer event in ${((Date.now() - s.lastPointerTime) / 1000).toFixed(1)}s`)
-      s.lastPointerTime = Date.now()
-    }
     rafRef.current = requestAnimationFrame(loop)
   }
 
@@ -581,6 +661,16 @@ export default function StockGrid() {
   useEffect(() => {
     resize()
     window.addEventListener('resize', resize)
+
+    // Zoom handler
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const s = state.current
+      const delta = e.deltaY > 0 ? 0.94 : 1.06
+      s.zoom = Math.max(0.7, Math.min(2.0, s.zoom * delta))
+    }
+    canvasRef.current?.addEventListener('wheel', onWheel, { passive: false })
+
     // Re-measure after the left rail collapses/expands (transition is 220ms)
     const onRailWidth = () => setTimeout(resize, 240)
     window.addEventListener('sprmfun:railwidth', onRailWidth)
@@ -658,13 +748,13 @@ export default function StockGrid() {
             id: col.id, x: col.x as number, boxes: col.boxes as Box[],
           }))
           s.history = (data.history as any[]).map((pt: any) => ({
-            x: pt.x as number, y: 1 - (pt.y as number),
+            x: pt.x as number, y: pt.y as number,
           }))
           s.currentX = data.currentX as number
-          s.prevColX = Math.floor(s.currentX / COLUMN_WIDTH) * COLUMN_WIDTH
+          s.prevColX = Math.floor(s.currentX / COLUMN_WIDTH_BASE) * COLUMN_WIDTH_BASE
 
           for (const pt of s.history) {
-            const colX = Math.floor(pt.x / COLUMN_WIDTH) * COLUMN_WIDTH
+            const colX = Math.floor(pt.x / COLUMN_WIDTH_BASE) * COLUMN_WIDTH_BASE
             const row = yToRow(pt.y)
             const existing = s.visitedCols.get(colX)
             if (!existing) {
@@ -683,16 +773,16 @@ export default function StockGrid() {
           s.pointerCount++
           if (s.pointerCount % 100 === 0) {
             const maxColX = s.columns.reduce((m, c) => Math.max(m, c.x), 0)
-            const aheadCols = Math.round((maxColX - s.currentX) / COLUMN_WIDTH)
+            const aheadCols = Math.round((maxColX - s.currentX) / COLUMN_WIDTH_BASE)
             console.log(`[PTR] tick=${s.pointerCount}  currentX=${Math.round(s.currentX)}  cols=${s.columns.length}  ahead=${aheadCols} cols`)
           }
 
-          const pt: PtPoint = { x: s.currentX, y: 1 - (data.y as number) }
+          const pt: PtPoint = { x: s.currentX, y: data.y as number }
           s.history.push(pt)
           if (s.history.length > MAX_HISTORY) s.history.shift()
           s.lastPtr = { y: pt.y }
 
-          const colX = Math.floor(s.currentX / COLUMN_WIDTH) * COLUMN_WIDTH
+          const colX = Math.floor(s.currentX / COLUMN_WIDTH_BASE) * COLUMN_WIDTH_BASE
           const row = yToRow(pt.y)
 
           if (colX !== s.prevColX) {
@@ -710,7 +800,7 @@ export default function StockGrid() {
             existing.leaveTime = null
           }
 
-          const pruneBeforeX = colX - 30 * COLUMN_WIDTH
+          const pruneBeforeX = colX - 30 * COLUMN_WIDTH_BASE
           for (const [k] of s.visitedCols) {
             if (k < pruneBeforeX) s.visitedCols.delete(k)
           }
@@ -719,7 +809,7 @@ export default function StockGrid() {
           let ghostChanged = false
           for (const [gkey] of s.ghostAll) {
             const gColX = parseInt(gkey.split('_')[0])
-            if (gColX < colX - COLUMN_WIDTH) { s.ghostAll.delete(gkey); ghostChanged = true }
+            if (gColX < colX - COLUMN_WIDTH_BASE) { s.ghostAll.delete(gkey); ghostChanged = true }
           }
           if (ghostChanged) resampleGhosts(s)
 
@@ -728,10 +818,10 @@ export default function StockGrid() {
             s.columns.push({ id: col.id, x: col.x as number, boxes: col.boxes as Box[] })
           })
           const pruneBeforeX = s.currentX - 2 * (s.W || 1920)
-          const pruneAfterX = s.currentX + 55 * COLUMN_WIDTH
+          const pruneAfterX = s.currentX + 55 * COLUMN_WIDTH_BASE
           s.columns = s.columns.filter(col => col.x >= pruneBeforeX && col.x <= pruneAfterX)
           const maxColX = s.columns.reduce((m, c) => Math.max(m, c.x), 0)
-          const aheadCols = Math.round((maxColX - s.currentX) / COLUMN_WIDTH)
+          const aheadCols = Math.round((maxColX - s.currentX) / COLUMN_WIDTH_BASE)
           console.log(`[GRID] rcvd ${(data.columns as any[]).length} cols  total=${s.columns.length}  currentX=${Math.round(s.currentX)}  maxColX=${maxColX}  ahead=${aheadCols} cols`)
 
         } else if (data.type === 'vrf_state') {
@@ -754,7 +844,7 @@ export default function StockGrid() {
             const winRow = s.vrfPath.get(sel.colX)
             if (winRow === undefined) continue
             // Only resolve if pointer has passed this column
-            if (s.currentX < sel.colX + COLUMN_WIDTH) continue
+            if (s.currentX < sel.colX + COLUMN_WIDTH_BASE) continue
             sel.result = (sel.row === winRow) ? 'win' : 'lose'
             sel.resultTime = now2
             s.lastResult = sel.result
@@ -844,17 +934,20 @@ export default function StockGrid() {
     const s = state.current
 
     function getBoxAt(mouseX: number, mouseY: number): { colX: number; row: number } | null {
+      const s = state.current
+      const zoom = s.zoom
       const W = s.W, H = s.H
       if (!W || !H) return null
       const rightMargin = Math.round(W * (1 - POINTER_LEFT_FRAC))
-      const viewX = s.currentX - (W - rightMargin)
-      const rowH = H / ROW_COUNT
+      const viewX = (s.currentX * zoom) - (W - rightMargin)
       const absX = mouseX + viewX
-      const colX = Math.floor(absX / COLUMN_WIDTH) * COLUMN_WIDTH
-      const curColX = Math.floor(s.currentX / COLUMN_WIDTH) * COLUMN_WIDTH
-      // Selectable: must be at least 10 columns ahead
-      if (colX <= curColX + 10 * COLUMN_WIDTH) return null
-      const row = Math.max(0, Math.min(ROW_COUNT - 1, ROW_COUNT - 1 - Math.floor(mouseY / rowH)))
+      const colX = Math.floor(absX / (COLUMN_WIDTH_BASE * zoom)) * COLUMN_WIDTH_BASE
+      const curColX = Math.floor(s.currentX / COLUMN_WIDTH_BASE) * COLUMN_WIDTH_BASE
+
+      if (colX <= curColX + 10 * COLUMN_WIDTH_BASE) return null
+      const viewY = (s.lerpY * 30 + 250) * (ROW_HEIGHT_BASE * zoom) - (s.H / 2)
+      const worldY = mouseY + viewY
+      const row = Math.floor(worldY / (ROW_HEIGHT_BASE * zoom))
       return { colX, row }
     }
 

@@ -13,15 +13,17 @@ const STORAGE_AUTO_CASHOUT = "sprmfun_auto_cashout";
 const STORAGE_ADVANCED_BETTING = "sprmfun_advanced_betting";
 
 const quickBtnStyle: CSSProperties = {
-  padding: "6px 10px",
-  borderRadius: 8,
-  border: `1px solid rgba(255,255,255,0.16)`,
-  background: "rgba(255,255,255,0.06)",
+  padding: "6px 12px",
+  borderRadius: 4,
+  border: `1px solid ${spermTheme.borderChrome}`,
+  background: "rgba(255,255,255,0.03)",
   color: spermTheme.textSecondary,
-  fontSize: 11,
+  fontSize: 10,
   fontWeight: 700,
-  fontFamily: "inherit",
+  fontFamily: "'JetBrains Mono', monospace",
   cursor: "pointer",
+  textTransform: 'uppercase',
+  letterSpacing: 1,
 };
 
 interface BetSidebarProps {
@@ -166,23 +168,32 @@ export default function BetSidebar({
       {/* ── INSTANT MODE WARNING ── */}
       {activeWallet === 'instant' && isActive && (
         <div style={{
-          background: 'rgba(227,150,170,0.12)',
-          border: `1.5px solid ${spermTheme.error}`,
-          borderRadius: 12, padding: '12px 16px',
+          background: 'rgba(227,150,170,0.04)',
+          border: `1px solid ${spermTheme.error}`,
+          borderRadius: 8, padding: '14px 16px',
           display: 'flex', flexDirection: 'column', gap: 6,
-          animation: 'sprmBlink 1.5s infinite ease-in-out',
+          boxShadow: `0 0 20px ${spermTheme.error}15`,
+          position: 'relative',
+          overflow: 'hidden'
         }}>
-          <div style={{ fontSize: 13, fontWeight: 900, color: spermTheme.error, letterSpacing: 1.5 }}>
-            ⚡ INSTANT MODE ACTIVE
+          <div style={{
+            position: 'absolute', top: 0, left: 0, bottom: 0, width: 2,
+            background: spermTheme.error,
+            animation: 'sprmWarningLine 2s infinite'
+          }} />
+          <div style={{
+            fontSize: 11, fontWeight: 900, color: spermTheme.error,
+            letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace"
+          }}>
+            SYSTEM: INSTANT_BET_ACTIVE
           </div>
-          <div style={{ fontSize: 11, color: spermTheme.textSecondary, lineHeight: 1.4 }}>
-            Clicking any box in the grid will <b>immediately</b> place a bet of {presetAmount} SPRM.
+          <div style={{ fontSize: 11, color: spermTheme.textSecondary, lineHeight: 1.5, fontFamily: "'Outfit', sans-serif" }}>
+            Direct grid interaction will execute <b style={{ color: spermTheme.textPrimary }}>{presetAmount} SPRM</b> transaction immediately.
           </div>
           <style>{`
-            @keyframes sprmBlink {
-              0% { opacity: 1; transform: scale(1); }
-              50% { opacity: 0.7; transform: scale(0.99); }
-              100% { opacity: 1; transform: scale(1); }
+            @keyframes sprmWarningLine {
+              0%, 100% { opacity: 0.3; }
+              50% { opacity: 1; }
             }
           `}</style>
         </div>
@@ -191,13 +202,14 @@ export default function BetSidebar({
       {/* ── BET SETTINGS CARD ─────────────────────────────── */}
       <div
         style={{
-          border: `1px solid rgba(245,245,242,0.14)`,
-          borderRadius: 16,
+          border: `1px solid ${spermTheme.borderChrome}`,
+          borderRadius: 12,
           padding: "18px 16px",
           display: "flex",
           flexDirection: "column",
           gap: 18,
-          background: "rgba(245,245,242,0.04)",
+          background: "rgba(255,255,255,0.02)",
+          backdropFilter: 'blur(8px)',
         }}
       >
         {/* Section header — click to collapse */}
@@ -280,18 +292,17 @@ export default function BetSidebar({
                     background: "rgba(255,255,255,0.06)",
                     backdropFilter: "blur(8px)",
                     WebkitBackdropFilter: "blur(8px)",
-                    border: `1.5px solid rgba(255,255,255,0.16)`,
-                    borderRadius: 10,
-                    padding: "12px 48px 12px 14px",
+                    border: `1px solid ${spermTheme.borderChrome}`,
+                    borderRadius: 8,
+                    padding: "14px 48px 14px 16px",
                     color: spermTheme.textPrimary,
-                    fontSize: 18,
-                    fontFamily: "inherit",
+                    fontSize: 22,
+                    fontFamily: "'JetBrains Mono', monospace",
                     fontWeight: 700,
                     outline: "none",
                     width: "100%",
                     boxSizing: "border-box",
-                    boxShadow:
-                      "inset 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)",
+                    boxShadow: "inset 0 2px 8px rgba(0,0,0,0.2)",
                     letterSpacing: 1,
                   }}
                 />
@@ -322,18 +333,18 @@ export default function BetSidebar({
                       style={{
                         flex: 1,
                         background: isActive
-                          ? "rgba(255,255,255,0.12)"
-                          : "rgba(255,255,255,0.04)",
-                        border: `1.5px solid ${isActive ? "rgba(245,245,242,0.35)" : "rgba(255,255,255,0.16)"}`,
-                        borderRadius: 10,
-                        padding: "9px 4px",
+                          ? "rgba(212,170,255,0.08)"
+                          : "rgba(255,255,255,0.02)",
+                        border: `1px solid ${isActive ? spermTheme.accentBorder : spermTheme.borderFaint}`,
+                        borderRadius: 6,
+                        padding: "10px 4px",
                         color: isActive
-                          ? spermTheme.textPrimary
-                          : RAIL_COLORS.textDim,
-                        fontSize: 13,
+                          ? spermTheme.accent
+                          : spermTheme.textTertiary,
+                        fontSize: 12,
                         fontWeight: 700,
                         cursor: "pointer",
-                        fontFamily: "inherit",
+                        fontFamily: "'JetBrains Mono', monospace",
                         transition: "all 0.15s ease",
                       }}
                     >
@@ -479,11 +490,11 @@ export default function BetSidebar({
                     color: "#fff",
                     fontFamily: "inherit",
                     boxShadow: isMe
-                      ? `0 0 10px ${avatarColor}80`
-                      : `0 2px 6px ${avatarColor}60`,
+                      ? `0 0 15px ${avatarColor}40`
+                      : `0 2px 8px rgba(0,0,0,0.3)`,
                     border: isMe
-                      ? "2px solid rgba(245,245,242,0.35)"
-                      : `1.5px solid rgba(245,245,242,0.14)`,
+                      ? `2px solid ${spermTheme.textPrimary}`
+                      : `1px solid ${spermTheme.borderChrome}`,
                   }}
                 >
                   {isMe ? "⚡" : initials}
@@ -552,13 +563,14 @@ export default function BetSidebar({
       {address && (
         <div
           style={{
-            border: `1px solid ${isActive && (sessionAvaxBalance ?? 0) > 0.005 ? 'rgba(152,214,194,0.3)' : 'rgba(245,245,242,0.14)'}`,
-            borderRadius: 16,
+            border: `1px solid ${isActive && (sessionAvaxBalance ?? 0) > 0.005 ? spermTheme.accentBorder : spermTheme.borderChrome}`,
+            borderRadius: 12,
             padding: '16px',
             display: 'flex',
             flexDirection: 'column',
             gap: 12,
-            background: isActive ? 'rgba(152,214,194,0.04)' : 'rgba(245,245,242,0.04)',
+            background: isActive ? 'rgba(212,170,255,0.02)' : 'rgba(255,255,255,0.02)',
+            backdropFilter: 'blur(8px)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

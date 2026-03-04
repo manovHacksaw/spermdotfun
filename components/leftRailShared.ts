@@ -57,17 +57,17 @@ export const panelBlurLayerStyle: CSSProperties = {
 
 export const panelBlurGradientStyle: CSSProperties = {
   position: 'absolute',
-  inset: '-40px',
+  inset: '-20px',
   background:
-    'radial-gradient(120% 110% at 0% 0%, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.01) 28%, transparent 60%), radial-gradient(130% 120% at 100% 100%, rgba(32,32,36,0.45) 0%, transparent 68%)',
-  filter: 'blur(18px)',
+    'radial-gradient(100% 100% at 0% 0%, rgba(255,255,255,0.03) 0%, transparent 50%), radial-gradient(100% 100% at 100% 100%, rgba(10,10,14,0.4) 0%, transparent 60%)',
+  filter: 'blur(20px)',
 }
 
 export const panelBlurTintStyle: CSSProperties = {
   position: 'absolute',
   inset: 0,
-  background: RAIL_COLORS.panelBg,
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
-  boxShadow: `inset 0 0 0 1px ${spermTheme.borderChrome}, inset 0 1px 0 rgba(255,255,255,0.05), inset 0 4px 20px rgba(0,0,0,0.15)`,
+  background: 'rgba(0, 0, 0, 0.45)',
+  backdropFilter: 'blur(32px)',
+  WebkitBackdropFilter: 'blur(32px)',
+  boxShadow: `inset 0 0 0 1px ${spermTheme.borderChrome}, inset 0 1px 0 rgba(255,255,255,0.03)`,
 }

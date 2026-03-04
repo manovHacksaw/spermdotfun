@@ -210,7 +210,7 @@ export default function TopHeader() {
         alignItems: "center",
         paddingLeft: isTiny ? 10 : 20,
         paddingRight: isTiny ? 8 : 16,
-        fontFamily: "Inter, sans-serif",
+        fontFamily: "'Outfit', sans-serif",
       }}
     >
       {/* Glass layer matching chat sidebar */}
@@ -236,10 +236,10 @@ export default function TopHeader() {
           style={{
             position: "absolute",
             inset: 0,
-            background: spermTheme.bgChrome,
-            backdropFilter: "blur(16px)",
-            WebkitBackdropFilter: "blur(16px)",
-            boxShadow: `inset 0 0 0 1px ${spermTheme.borderChrome}, inset 0 1px 0 rgba(255,255,255,0.05), inset 0 4px 20px rgba(0,0,0,0.15)`,
+            background: 'rgba(0, 0, 0, 0.4)',
+            backdropFilter: "blur(32px)",
+            WebkitBackdropFilter: "blur(32px)",
+            boxShadow: `inset 0 0 0 1px ${spermTheme.borderChrome}, inset 0 1px 0 rgba(255,255,255,0.03)`,
           }}
         />
       </div>
@@ -290,21 +290,21 @@ export default function TopHeader() {
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
-                background: "rgba(197, 140, 255, 0.08)",
-                border: "1px solid rgba(197, 140, 255, 0.25)",
-                borderRadius: 20,
-                padding: "4px 12px",
-                fontFamily: '"JetBrains Mono", monospace',
+                background: "rgba(212, 170, 255, 0.05)",
+                border: `1px solid ${spermTheme.accentBorder}`,
+                borderRadius: 4,
+                padding: "8px 16px",
+                fontFamily: "'JetBrains Mono', monospace",
               }}
             >
               <div
                 style={{
-                  width: 6,
-                  height: 6,
+                  width: 5,
+                  height: 5,
                   borderRadius: "50%",
-                  background: "#C58CFF",
-                  boxShadow: "0 0 8px #C58CFF",
-                  animation: "pulse 1.5s infinite",
+                  background: spermTheme.accent,
+                  boxShadow: `0 0 10px ${spermTheme.accent}`,
+                  animation: "pulse 2s infinite",
                 }}
               />
               <span style={{ fontSize: 10, color: "rgba(245, 245, 242, 0.6)", fontWeight: 700, letterSpacing: 0.5 }}>AVAX</span>
@@ -352,20 +352,18 @@ export default function TopHeader() {
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: isTiny ? 5 : 10,
-                      background: walletOpen
-                        ? "linear-gradient(180deg, rgba(28,28,32,0.98), rgba(12,12,14,0.96))"
-                        : "linear-gradient(180deg, rgba(22,22,26,0.95), rgba(10,10,12,0.92))",
-                      border: `1px solid ${walletOpen ? "rgba(245,245,242,0.38)" : "rgba(245,245,242,0.20)"}`,
-                      borderRadius: 12,
-                      padding: isTiny ? "0 8px" : "0 16px",
+                      gap: isTiny ? 5 : 12,
+                      background: "rgba(255,255,255,0.02)",
+                      border: `1px solid ${walletOpen ? spermTheme.accentBorder : spermTheme.borderChrome}`,
+                      borderRadius: 8,
+                      padding: isTiny ? "0 10px" : "0 18px",
                       height: btnSize,
                       color: "#fff",
                       cursor: "pointer",
-                      fontFamily: "inherit",
-                      transition: "all 0.15s",
+                      fontFamily: "'JetBrains Mono', monospace",
+                      transition: "all 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
                       boxShadow: walletOpen
-                        ? "0 10px 24px rgba(0,0,0,0.42), inset 0 0 0 1px rgba(255,255,255,0.08)"
+                        ? `0 0 30px ${spermTheme.accent}15`
                         : "none",
                       minWidth: 0,
                       overflow: "hidden",
@@ -439,13 +437,13 @@ export default function TopHeader() {
                         position: "absolute",
                         top: "calc(100% + 10px)",
                         right: 0,
-                        width: 292,
-                        borderRadius: 16,
-                        border: `1px solid rgba(245,245,242,0.14)`,
-                        background: spermTheme.bgChrome,
-                        backdropFilter: "blur(16px)",
-                        WebkitBackdropFilter: "blur(16px)",
-                        boxShadow: "0 20px 50px rgba(0,0,0,0.5)",
+                        width: 320,
+                        borderRadius: 8,
+                        border: `1px solid ${spermTheme.borderChrome}`,
+                        background: 'rgba(0, 0, 0, 0.85)',
+                        backdropFilter: "blur(32px)",
+                        WebkitBackdropFilter: "blur(32px)",
+                        boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
                         zIndex: 420,
                       }}
                     >
@@ -506,20 +504,21 @@ export default function TopHeader() {
                           >
                             💎
                           </div>
-                          <div style={{ flex: 1 }}>
+                          <div style={{ flex: 1, fontFamily: "'JetBrains Mono', monospace" }}>
                             <div
                               style={{
-                                fontSize: 12,
+                                fontSize: 10,
                                 fontWeight: 800,
-                                color: "rgba(245,245,242,0.92)",
-                                marginBottom: 1,
+                                color: spermTheme.textTertiary,
+                                marginBottom: 4,
+                                letterSpacing: 1.5
                               }}
                             >
-                              SPRM (Primary)
+                              SPRM_PRIMARY
                             </div>
                             <div
                               style={{
-                                fontSize: 28,
+                                fontSize: 24,
                                 color: "#F5F5F2",
                                 fontWeight: 900,
                                 lineHeight: 1,
@@ -629,10 +628,11 @@ export default function TopHeader() {
                               </div>
                               <div
                                 style={{
-                                  fontSize: 27,
-                                  color: "#C58CFF",
+                                  fontSize: 24,
+                                  color: spermTheme.accent,
                                   fontWeight: 900,
                                   lineHeight: 1,
+                                  fontFamily: "'JetBrains Mono', monospace"
                                 }}
                               >
                                 {session.isActive
@@ -1140,12 +1140,12 @@ export default function TopHeader() {
                     top: "calc(100% + 10px)",
                     right: 0,
                     width: 284,
-                    borderRadius: 16,
-                    border: `1px solid rgba(245,245,242,0.14)`,
-                    background: spermTheme.bgChrome,
-                    backdropFilter: "blur(16px)",
-                    WebkitBackdropFilter: "blur(16px)",
-                    boxShadow: "0 20px 52px rgba(0,0,0,0.76)",
+                    borderRadius: 8,
+                    border: `1px solid ${spermTheme.borderChrome}`,
+                    background: 'rgba(0,0,0,0.85)',
+                    backdropFilter: "blur(32px)",
+                    WebkitBackdropFilter: "blur(32px)",
+                    boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
                     zIndex: 450,
                   }}
                 >
@@ -1337,7 +1337,7 @@ export default function TopHeader() {
                           flexShrink: 0,
                         }}
                       />
-                      <span>Disconnect</span>
+                      <span>DISCONNECT_SYSTEM</span>
                     </button>
                   </div>
                 </div>

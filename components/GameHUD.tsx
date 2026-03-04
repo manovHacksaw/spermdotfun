@@ -326,21 +326,23 @@ export default function GameHUD() {
   const hudStyle: React.CSSProperties = {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     pointerEvents: 'none', zIndex: 10,
-    fontFamily: 'Inter, sans-serif',
+    fontFamily: "'Outfit', sans-serif",
   }
 
   const modalOverlayStyle: React.CSSProperties = {
     position: 'absolute', inset: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: 'rgba(0,0,0,0.55)', pointerEvents: 'all',
+    background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(12px)',
+    pointerEvents: 'all', zIndex: 100,
   }
 
   const modalStyle: React.CSSProperties = {
     background: spermTheme.bgElevated,
-    border: `1.5px solid ${spermTheme.accentBorder}`,
-    borderRadius: 12, padding: '24px 28px',
-    minWidth: 280, color: spermTheme.textPrimary,
-    display: 'flex', flexDirection: 'column', gap: 14,
+    border: `1px solid ${spermTheme.accentBorder}`,
+    borderRadius: 8, padding: '28px 32px',
+    minWidth: 320, color: spermTheme.textPrimary,
+    display: 'flex', flexDirection: 'column', gap: 18,
+    boxShadow: `0 0 40px rgba(212,170,255,0.08)`,
   }
 
   return (
@@ -355,14 +357,15 @@ export default function GameHUD() {
         }}>
           <div style={{
             background: spermTheme.bgElevated,
-            border: `1.5px solid ${spermTheme.accentBorder}`,
-            borderRadius: 20, padding: 32, maxWidth: 440,
-            display: 'flex', flexDirection: 'column', gap: 20,
+            border: `1px solid ${spermTheme.accentBorder}`,
+            borderRadius: 12, padding: 32, maxWidth: 440,
+            display: 'flex', flexDirection: 'column', gap: 24,
             color: spermTheme.textPrimary,
-            boxShadow: `0 0 40px rgba(197,140,255,0.15)`,
-            animation: 'sprmIn 0.5s ease-out',
+            boxShadow: `0 0 60px rgba(0,0,0,0.5), 0 0 30px ${spermTheme.accentGlow}`,
+            animation: 'sprmIn 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
+            backdropFilter: 'blur(20px)',
           }}>
-            <div style={{ fontSize: 22, fontWeight: 900, color: spermTheme.accent }}>HOW TO PLAY</div>
+            <div style={{ fontSize: 24, fontWeight: 900, color: spermTheme.accent, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace" }}>SYSTEM_INITIALIZE</div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: 14, color: spermTheme.textSecondary, lineHeight: 1.6 }}>
               <div style={{ display: 'flex', gap: 12 }}>
@@ -398,11 +401,12 @@ export default function GameHUD() {
       {(connected || session.isActive) && (
         <div style={{
           position: 'absolute', top: 20, left: 20,
-          display: 'flex', alignItems: 'center', gap: 8,
-          background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(12px)',
           border: `1px solid ${spermTheme.borderChrome}`,
-          borderRadius: 20, padding: '4px 12px 4px 6px',
+          borderRadius: 4, padding: '6px 14px 6px 8px',
           zIndex: 40, pointerEvents: 'all',
+          fontFamily: "'JetBrains Mono', monospace",
         }}>
           <div style={{
             width: 8, height: 8, borderRadius: '50%',
@@ -440,23 +444,23 @@ export default function GameHUD() {
       {resolution && (
         <div style={{
           position: 'absolute', top: 120, left: '50%', transform: 'translateX(-50%)',
-          background: resolution.won ? 'rgba(152,214,194,0.12)' : 'rgba(227,150,170,0.12)',
-          backdropFilter: 'blur(12px)',
-          border: `1.5px solid ${resolution.won ? spermTheme.success : spermTheme.error}`,
-          borderRadius: 14, padding: '20px 32px',
+          background: 'rgba(0,0,0,0.82)',
+          backdropFilter: 'blur(24px)',
+          border: `1px solid ${resolution.won ? spermTheme.success : spermTheme.error}`,
+          borderRadius: 4, padding: '24px 48px',
           color: resolution.won ? spermTheme.success : spermTheme.error,
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
           pointerEvents: 'all', zIndex: 60,
-          boxShadow: `0 8px 32px rgba(0,0,0,0.4), 0 0 16px ${resolution.won ? 'rgba(152,214,194,0.15)' : 'rgba(227,150,170,0.15)'}`,
-          animation: 'sprmIn 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28)',
+          boxShadow: `0 12px 48px rgba(0,0,0,0.6), 0 0 20px ${resolution.won ? spermTheme.success + '20' : spermTheme.error + '20'}`,
+          animation: 'sprmIn 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
         }}>
           <div style={{ fontSize: 24, fontWeight: 900, letterSpacing: 1.5 }}>
             {resolution.won ? 'WINNER!' : 'BET SETTLED'}
           </div>
-          <div style={{ fontSize: 13, color: spermTheme.textPrimary, fontWeight: 600 }}>
+          <div style={{ fontSize: 14, color: spermTheme.textPrimary, fontWeight: 800, fontFamily: "'JetBrains Mono', monospace" }}>
             {resolution.won
-              ? `+${resolution.payout.toFixed(3)} SPRM`
-              : `Lost — Row ${resolution.box_row}`}
+              ? `PROFIT: +${resolution.payout.toFixed(3)} SPRM`
+              : `SETTLED: LOSS [ROW_${resolution.box_row}]`}
           </div>
           {resolution.txHash && (
             <a

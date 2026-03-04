@@ -251,29 +251,31 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
 
   return (
     <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', borderBottom: `1px solid ${RAIL_COLORS.border}`, background: RAIL_COLORS.tabBg, flexShrink: 0 }}>
+      <div style={{ display: 'flex', borderBottom: `1px solid ${RAIL_COLORS.border}`, background: 'rgba(255,255,255,0.02)', flexShrink: 0 }}>
         {([
-          { id: 'chat', icon: <MessageSquare size={13} />, label: 'CHAT' },
-          { id: 'leaderboard', icon: <Trophy size={13} />, label: 'TOP' },
+          { id: 'chat', icon: <MessageSquare size={12} />, label: 'CHAT' },
+          { id: 'leaderboard', icon: <Trophy size={12} />, label: 'LEADERBOARD' },
         ] as { id: Tab; icon: React.ReactNode; label: string }[]).map((tabBtn) => (
           <button
             key={tabBtn.id}
             onClick={() => setTab(tabBtn.id)}
             style={{
               flex: 1,
-              padding: '9px 4px',
-              background: tab === tabBtn.id ? RAIL_COLORS.tabActiveBg : 'transparent',
+              padding: '12px 4px',
+              background: tab === tabBtn.id ? 'rgba(212,170,255,0.05)' : 'transparent',
               border: 'none',
-              borderBottom: tab === tabBtn.id ? `2px solid ${RAIL_COLORS.accent}` : '2px solid transparent',
-              color: tab === tabBtn.id ? RAIL_COLORS.accent : RAIL_COLORS.textDim,
+              borderBottom: tab === tabBtn.id ? `2px solid ${spermTheme.accent}` : '2px solid transparent',
+              color: tab === tabBtn.id ? spermTheme.accent : spermTheme.textTertiary,
               cursor: 'pointer',
               display: 'flex',
-              flexDirection: 'column',
               alignItems: 'center',
-              gap: 3,
-              fontSize: 9,
-              letterSpacing: 1,
-              fontWeight: 600,
+              justifyContent: 'center',
+              gap: 8,
+              fontSize: 10,
+              letterSpacing: 1.5,
+              fontWeight: 800,
+              fontFamily: "'JetBrains Mono', monospace",
+              transition: 'all 0.2s',
             }}
           >
             {tabBtn.icon}
@@ -399,17 +401,19 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
                     </div>
 
                     {msg.isGif ? (
-                      <img src={msg.text} alt="gif" style={{ maxWidth: '100%', borderRadius: 8 }} />
+                      <img src={msg.text} alt="gif" style={{ maxWidth: '100%', borderRadius: 6, border: `1px solid ${spermTheme.borderChrome}` }} />
                     ) : (
                       <span
                         style={{
                           fontSize: 13,
-                          color: RAIL_COLORS.text,
-                          background: isMe ? 'rgba(245,245,242,0.11)' : 'rgba(245,245,242,0.06)',
-                          border: `1px solid ${isMe ? 'rgba(245,245,242,0.24)' : 'rgba(245,245,242,0.14)'}`,
-                          borderRadius: isMe ? '10px 2px 10px 10px' : '2px 10px 10px 10px',
-                          padding: '7px 11px',
+                          color: spermTheme.textPrimary,
+                          background: isMe ? 'rgba(212,170,255,0.06)' : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${isMe ? 'rgba(212,170,255,0.2)' : spermTheme.borderChrome}`,
+                          borderRadius: isMe ? '8px 2px 8px 8px' : '2px 8px 8px 8px',
+                          padding: '8px 12px',
                           wordBreak: 'break-word',
+                          lineHeight: 1.5,
+                          fontFamily: "'Outfit', sans-serif"
                         }}
                       >
                         {msg.text}
@@ -640,12 +644,12 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
                     </div>
                   </div>
 
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: profit >= 0 ? spermTheme.success : spermTheme.error }}>
+                  <div style={{ textAlign: 'right', flexShrink: 0, fontFamily: "'JetBrains Mono', monospace" }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: profit >= 0 ? spermTheme.success : spermTheme.error }}>
                       {profit >= 0 ? '+' : ''}
                       {profit.toFixed(2)}
                     </div>
-                    <div style={{ fontSize: 9, color: RAIL_COLORS.textDim }}>SPRM</div>
+                    <div style={{ fontSize: 9, color: spermTheme.textTertiary, letterSpacing: 1 }}>SPRM</div>
                   </div>
                 </div>
               )
