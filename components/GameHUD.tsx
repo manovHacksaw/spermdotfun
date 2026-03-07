@@ -20,9 +20,13 @@ const ERC20_ABI = [
 ]
 
 const GAME_ABI = [
-  'function placeBet(uint32 boxX, uint8 boxRow, uint16 multNum, uint256 amount) returns (uint256 betId)',
-  'event BetPlaced(uint256 indexed betId, address indexed player, uint32 boxX, uint8 boxRow, uint16 multNum, uint256 amount)',
+  'function placeBet(uint32 boxX, uint16 boxRow, uint16 multNum, uint256 amount) returns (uint256 betId)',
+  'event BetPlaced(uint256 indexed betId, address indexed player, uint32 boxX, uint16 boxRow, uint16 multNum, uint256 amount)',
 ]
+
+// Global Mutex to serialize transaction broadcasts and prevent Nonce overlap
+// while still allowing the user to "spray bet" asynchronously.
+let betMutex = Promise.resolve()
 
 export default function GameHUD() {
   const { address, signer, connected } = useEvmWallet()
@@ -33,8 +37,9 @@ export default function GameHUD() {
   // Session wallet (shared context — no prop drilling)
   const session = useSessionWalletContext()
 
-  // Bet modal state
-  const [pendingBet, setPendingBet] = useState<{ colX: number; row: number; multNum: number; multDen: number; multDisp: number } | null>(null)
+  // Bet modal state (switched to queue to support spray betting)
+  const [pendingBetsQueue, setPendingBetsQueue] = useState<{ id: string; colX: number; row: number; multNum: number; multDen: number; multDisp: number }[]>([])
+  const pendingBet = pendingBetsQueue[0] || null // Modal uses the first item if manual confirmation is needed
   const [betAmount, setBetAmount] = useState('1')
   const [betStatus, setBetStatus] = useState<'idle' | 'submitting' | 'done' | 'error'>('idle')
   const [betError, setBetError] = useState('')
@@ -83,7 +88,7 @@ export default function GameHUD() {
   // ── Cancel modal — deselect the box in the grid ──────────────────────────
   const cancelBet = useCallback((colX: number, row: number) => {
     window.dispatchEvent(new CustomEvent('sprmfun:deselect', { detail: { colX, row } }))
-    setPendingBet(null)
+    setPendingBetsQueue(prev => prev.filter(b => b.colX !== colX || b.row !== row))
   }, [])
 
   // ── Listen for box-click events from StockGrid ───────────────────────────
@@ -91,14 +96,18 @@ export default function GameHUD() {
     function onSelect(e: CustomEvent) {
       const { colX, row, multNum, multDen, multDisp } = e.detail
       if (!connected && !session.isActive) return
-      const betData = { colX, row, multNum: multNum ?? 150, multDen: multDen ?? 100, multDisp: multDisp ?? 1.5 }
-      if (quickBet) {
+      const betData = { id: `${colX}_${row}`, colX, row, multNum: multNum ?? 150, multDen: multDen ?? 100, multDisp: multDisp ?? 1.5 }
+      const useSession = session.activeWallet === 'instant' && session.isActive && !!session.sessionWallet
+
+      if (quickBet || useSession) {
+        // Spray fire immediately — do not clear queue, just append
         setBetAmount(presetAmount)
-        setPendingBet(betData)
+        setPendingBetsQueue(prev => [...prev.filter(b => b.id !== betData.id), betData])
         setBetStatus('idle')
         setBetError('')
       } else {
-        setPendingBet(betData)
+        // Native modal — replace queue with just this one to avoid stacking modals
+        setPendingBetsQueue([betData])
         setBetAmount(presetAmount)
         setBetStatus('idle')
         setBetError('')
@@ -106,7 +115,7 @@ export default function GameHUD() {
     }
     window.addEventListener('sprmfun:select', onSelect as EventListener)
     return () => window.removeEventListener('sprmfun:select', onSelect as EventListener)
-  }, [connected, quickBet, presetAmount, session.isActive])
+  }, [connected, quickBet, presetAmount, session.isActive, session.activeWallet, session.sessionWallet])
 
   // Notify sidebar when pending bet state changes (for Place Bet button)
   useEffect(() => {
@@ -136,8 +145,26 @@ export default function GameHUD() {
         resTimer.current = setTimeout(() => setResolution(null), 6000)
       }
     }
+    const onReceipt = (e: CustomEvent) => {
+      const { txHash, user: betUser } = e.detail
+      if (betUser === address || betUser === session.sessionAddress) {
+        setResolution(prev => prev ? { ...prev, txHash } : null)
+      }
+    }
+    const onResolveFailed = (e: CustomEvent) => {
+      const { error, user: betUser } = e.detail
+      if (betUser === address || betUser === session.sessionAddress) {
+        showSessionToast(`Payout failed: ${error}`, false)
+      }
+    }
     window.addEventListener('sprmfun:betresult', onResult as EventListener)
-    return () => window.removeEventListener('sprmfun:betresult', onResult as EventListener)
+    window.addEventListener('sprmfun:betreceipt', onReceipt as EventListener)
+    window.addEventListener('sprmfun:betresolvefailed', onResolveFailed as EventListener)
+    return () => {
+      window.removeEventListener('sprmfun:betresult', onResult as EventListener)
+      window.removeEventListener('sprmfun:betreceipt', onReceipt as EventListener)
+      window.removeEventListener('sprmfun:betresolvefailed', onResolveFailed as EventListener)
+    }
   }, [address, session.sessionAddress])
 
   // ── Place bet ────────────────────────────────────────────────────────────
@@ -156,30 +183,17 @@ export default function GameHUD() {
     setBetStatus('submitting')
     setBetError('')
 
-    // Use a window flag to block concurrent betting transactions
-    if ((window as any)._sprmBettingInFlight) return
-      ; (window as any)._sprmBettingInFlight = true
-
     // ── Decide which signer to use ────────────────────────────────────────
     const useSession = session.activeWallet === 'instant' && session.isActive && !!session.sessionWallet
 
-    if (!useSession && (!signer || !address)) {
-      ; (window as any)._sprmBettingInFlight = false
-      return
-    }
-    if (useSession && !session.sessionWallet) {
-      ; (window as any)._sprmBettingInFlight = false
-      return
-    }
-
-    // ── Balance check before sending ─────────────────────────────────────
-    const availableBalance = useSession ? (session.sessionSprmBalance ?? 0) : (balance ?? 0)
-    if (amountTokens > availableBalance) {
-      const msg = `Insufficient balance: need ${amountTokens} SPRM, have ${availableBalance.toFixed(4)} SPRM`
+    const currentSprmBal = useSession ? session.sessionSprmBalance : balance
+    if (currentSprmBal === undefined || currentSprmBal === null || currentSprmBal < amountTokens) {
+      const msg = `Insufficient SPRM balance. Need ${amountTokens}, have ${currentSprmBal?.toFixed(2) ?? 0}`
       if (useSession) {
-        showSessionToast('Insufficient balance', false)
-        setPendingBet(null)
-        setBetStatus('idle')
+        showSessionToast('Insufficient SPRM in Instant Wallet', false)
+        if (pendingBet) setPendingBetsQueue(prev => prev.filter(b => b.id !== pendingBet.id))
+        setBetStatus('error')
+          ; (window as any)._sprmBettingInFlight = false
       } else {
         setBetError(msg)
         setBetStatus('error')
@@ -187,113 +201,158 @@ export default function GameHUD() {
       return
     }
 
-    try {
-      let betSigner: ethers.Signer
-      let signerAddress: string
+    // ── Execute Bet ──────────────────────────────────────────────────────────
+    // Fire and forget strategy so multiple can be processed concurrently
+    // Only lock window for the raw modal signing if it's the primary wallet
+    if (!useSession && !quickBet) {
+      if ((window as any)._sprmBettingInFlight) return
+        ; (window as any)._sprmBettingInFlight = true
+    }
 
+    // Immediately pop it from the visual queue to let the modal vanish while mining
+    setPendingBetsQueue(prev => prev.filter(b => b.id !== pendingBet.id))
+
+    // Balance check before sending
+    const availableBalance = useSession ? (session.sessionSprmBalance ?? 0) : (balance ?? 0)
+    if (amountTokens > availableBalance) {
+      const msg = `Insufficient balance: need ${amountTokens} SPRM, have ${availableBalance.toFixed(4)} SPRM`
       if (useSession) {
-        // Connect session wallet to JsonRpcProvider (self-funded AVAX for gas)
-        const provider = new ethers.JsonRpcProvider(RPC_URL)
-        betSigner = session.sessionWallet!.connect(provider)
-        signerAddress = session.sessionWallet!.address
+        showSessionToast('Insufficient balance', false)
       } else {
-        betSigner = signer!
-        signerAddress = address!
+        setBetError(msg)
+        setBetStatus('error')
+        setPendingBetsQueue([pendingBet]) // put it back for retry
       }
-
-      if (!TOKEN_ADDRESS || !GAME_ADDRESS) {
-        throw new Error('Contract addresses not configured in environment variables')
+      if (!useSession && !quickBet) {
+        ; (window as any)._sprmBettingInFlight = false
       }
+      return
+    }
 
-      // 1. Approve game contract to spend SPRM
-      //    We check allowance for BOTH primary and session wallets to avoid redundant txs.
-      const token = new ethers.Contract(TOKEN_ADDRESS, ERC20_ABI, betSigner)
-      const allowance: bigint = await token.allowance(signerAddress, GAME_ADDRESS)
+    if (useSession) {
+      // Optimistically deduct balance up front to allow safe spray firing
+      if (session.sessionSprmBalance !== null) session.optimisticDeduct(amountTokens)
+    }
 
-      if (allowance < amountRaw) {
-        console.log(`[BET] insufficient allowance: ${ethers.formatEther(allowance)} < ${ethers.formatEther(amountRaw)}. Approving...`)
-        // For primary wallet, we approve exactly what's needed for safety.
-        // For session wallet, we approve MAX to avoid future prompts.
-        const approveAmt = useSession ? ethers.MaxUint256 : amountRaw
-        const approveTx = await token.approve(GAME_ADDRESS, approveAmt)
-        console.log('[BET] approve tx sent:', approveTx.hash)
-        await approveTx.wait()
-        console.log('[BET] approve tx confirmed')
-      }
+    // Serialize execution to prevent exact-moment Nonce collisions 
+    // when "spray betting" very fast.
+    betMutex = betMutex.then(async () => {
+      try {
+        let betSigner: ethers.Signer
+        let signerAddress: string
 
-      // 2. Call placeBet on the game contract
-      // multNum is a uint16 — e.g. 173 for 1.73x
-      const game = new ethers.Contract(GAME_ADDRESS, GAME_ABI, betSigner)
-      const multNum16 = Math.round(multNum) & 0xFFFF // ensure uint16 range
-      const betTx = await game.placeBet(
-        box_x,       // uint32 pixel coordinate
-        box_row,     // uint8 row index
-        multNum16,   // uint16 multiplier numerator (e.g. 173 = 1.73x)
-        amountRaw,   // uint256 SPRM amount (18 decimals)
-      )
-      console.log('[BET] placeBet tx:', betTx.hash)
-      const receipt = await betTx.wait()
+        if (useSession) {
+          // Connect session wallet to JsonRpcProvider (self-funded AVAX for gas)
+          const provider = new ethers.JsonRpcProvider(RPC_URL)
+          betSigner = session.sessionWallet!.connect(provider)
+          signerAddress = session.sessionWallet!.address
 
-      // 3. Extract betId from BetPlaced event logs
-      let betId: bigint | null = null
-      if (receipt && receipt.logs) {
-        const gameInterface = new ethers.Interface(GAME_ABI)
-        for (const log of receipt.logs) {
-          try {
-            const parsed = gameInterface.parseLog({ topics: log.topics as string[], data: log.data })
-            if (parsed && parsed.name === 'BetPlaced') {
-              betId = parsed.args[0] as bigint
-              break
-            }
-          } catch { /* not this event */ }
+          // Check if session wallet has AVAX for gas
+          const avaxBal = await provider.getBalance(signerAddress)
+          if (avaxBal === BigInt(0)) {
+            showSessionToast('Insta Wallet needs AVAX for gas! Click "Top Up Gas".', false)
+            setBetStatus('error')
+            return
+          }
+        } else {
+          // Mutex serializes bets so plain signer is safe — no nonce overlap possible
+          betSigner = signer!
+          signerAddress = address!
+        }
+
+        if (!TOKEN_ADDRESS || !GAME_ADDRESS) {
+          throw new Error('Contract addresses not configured in environment variables')
+        }
+
+        // 1. Approve game contract to spend SPRM
+        //    We check allowance for BOTH primary and session wallets to avoid redundant txs.
+        const token = new ethers.Contract(TOKEN_ADDRESS, ERC20_ABI, betSigner)
+        const allowance: bigint = await token.allowance(signerAddress, GAME_ADDRESS)
+
+        if (allowance < amountRaw) {
+          console.log(`[BET] insufficient allowance: ${ethers.formatEther(allowance)} < ${ethers.formatEther(amountRaw)}. Approving...`)
+          // For primary wallet, we approve exactly what's needed for safety.
+          // For session wallet, we approve MAX to avoid future prompts.
+          const approveAmt = useSession ? ethers.MaxUint256 : amountRaw
+          const approveTx = await token.approve(GAME_ADDRESS, approveAmt)
+          console.log('[BET] approve tx sent:', approveTx.hash)
+          await approveTx.wait()
+          console.log('[BET] approve tx confirmed')
+        }
+
+        // 2. Call placeBet on the game contract
+        // multNum is a uint16 — e.g. 173 for 1.73x
+        const game = new ethers.Contract(GAME_ADDRESS, GAME_ABI, betSigner)
+        const multNum16 = Math.round(multNum) & 0xFFFF // ensure uint16 range
+        const betTx = await game.placeBet(
+          box_x,       // uint32 pixel coordinate
+          box_row,     // uint8 row index
+          multNum16,   // uint16 multiplier numerator (e.g. 173 = 1.73x)
+          amountRaw,   // uint256 SPRM amount (18 decimals)
+        )
+        console.log('[BET] placeBet tx:', betTx.hash)
+        const receipt = await betTx.wait()
+
+        // 3. Extract betId from BetPlaced event logs
+        let betId: bigint | null = null
+        if (receipt && receipt.logs) {
+          const gameInterface = new ethers.Interface(GAME_ABI)
+          for (const log of receipt.logs) {
+            try {
+              const parsed = gameInterface.parseLog({ topics: log.topics as string[], data: log.data })
+              if (parsed && parsed.name === 'BetPlaced') {
+                betId = parsed.args[0] as bigint
+                break
+              }
+            } catch { /* not this event */ }
+          }
+        }
+
+        console.log('[BET] betId:', betId?.toString())
+
+        // 4. Register the bet with the server for auto-resolution
+        fetch('/register-bet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            betId: betId?.toString() ?? '',
+            user: signerAddress,
+            box_x,
+            box_row,
+            mult_num: multNum16,
+            bet_amount: amountTokens,
+          }),
+        }).then(() => console.log('[BET] register-bet sent to server'))
+          .catch(e => console.warn('[BET] register-bet failed:', e.message))
+
+
+        setBetStatus('done')
+        if (useSession) {
+          showSessionToast(`Bet placed — ${amountTokens} SPRM @ ${multDisp.toFixed(2)}x`, true)
+        } else {
+          await refreshBalance()
+          setTimeout(() => { setBetStatus('idle') }, 1500)
+        }
+      } catch (err: any) {
+        console.error('[BET]', err)
+        if (useSession) {
+          const isNoGas = err?.code === 'INSUFFICIENT_FUNDS' || err?.message?.includes('insufficient funds')
+          const msg = isNoGas
+            ? 'Session needs AVAX gas — top up in sidebar'
+            : 'Bet failed: ' + (err?.message?.slice(0, 50) ?? 'error')
+          showSessionToast(msg, false)
+        } else {
+          setBetError(err?.message?.slice(0, 120) ?? 'Transaction failed')
+          setBetStatus('error')
+          setPendingBetsQueue(prev => [...prev.filter(b => b.id !== pendingBet.id), pendingBet]) // restore for native modal
+        }
+      } finally {
+        if (!useSession && !quickBet) {
+          ; (window as any)._sprmBettingInFlight = false
         }
       }
-
-      console.log('[BET] betId:', betId?.toString())
-
-      // 4. Register the bet with the server for auto-resolution
-      fetch('/register-bet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          betId: betId?.toString() ?? '',
-          user: signerAddress,
-          box_x,
-          box_row,
-          mult_num: multNum16,
-          bet_amount: amountTokens,
-        }),
-      }).then(() => console.log('[BET] register-bet sent to server'))
-        .catch(e => console.warn('[BET] register-bet failed:', e.message))
-
-      setBetStatus('done')
-      if (useSession) {
-        if (session.sessionSprmBalance !== null) session.optimisticDeduct(amountTokens)
-        showSessionToast(`Bet placed — ${amountTokens} SPRM @ ${multDisp.toFixed(2)}x`, true)
-        setPendingBet(null)
-        setBetStatus('idle')
-      } else {
-        await refreshBalance()
-        setTimeout(() => { setPendingBet(null); setBetStatus('idle') }, 1500)
-      }
-    } catch (err: any) {
-      console.error('[BET]', err)
-      if (useSession) {
-        const isNoGas = err?.code === 'INSUFFICIENT_FUNDS' || err?.message?.includes('insufficient funds')
-        const msg = isNoGas
-          ? 'Session needs AVAX gas — top up in sidebar'
-          : 'Bet failed: ' + (err?.message?.slice(0, 50) ?? 'error')
-        showSessionToast(msg, false)
-        setPendingBet(null)
-        setBetStatus('idle')
-      } else {
-        setBetError(err?.message?.slice(0, 120) ?? 'Transaction failed')
-        setBetStatus('error')
-      }
-    } finally {
-      ; (window as any)._sprmBettingInFlight = false
-    }
-  }, [signer, address, pendingBet, betAmount, balance, session, refreshBalance])
+    }).catch(e => console.error("Mutex Error:", e))
+  }, [signer, address, pendingBetsQueue, pendingBet, betAmount, balance, session, refreshBalance, quickBet])
 
   // Sidebar "Place Bet" button triggers same handler (must be after handlePlaceBet is defined)
   useEffect(() => {
@@ -462,7 +521,11 @@ export default function GameHUD() {
               ? `PROFIT: +${resolution.payout.toFixed(3)} SPRM`
               : `SETTLED: LOSS [ROW_${resolution.box_row}]`}
           </div>
-          {resolution.txHash && (
+          {resolution.txHash === 'pending' ? (
+            <div style={{ fontSize: 13, color: spermTheme.textTertiary, fontStyle: 'italic', marginTop: 8 }}>
+              Resolving on-chain...
+            </div>
+          ) : resolution.txHash ? (
             <a
               href={`https://testnet.snowtrace.io/tx/${resolution.txHash}`}
               target="_blank" rel="noreferrer"
@@ -474,7 +537,7 @@ export default function GameHUD() {
             >
               View on Snowtrace <span style={{ fontSize: 12 }}>↗</span>
             </a>
-          )}
+          ) : null}
           <style>{`
             @keyframes sprmIn {
               from { opacity: 0; transform: translate(-50%, -30px) scale(0.9); }

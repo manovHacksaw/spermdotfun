@@ -23,6 +23,7 @@ import { useSessionWalletContext } from "@/context/SessionWalletContext";
 import { useSprmBalance } from "@/hooks/useSprmBalance";
 import { type ProfileTab } from "@/lib/profile/types";
 import { spermTheme } from "@/components/theme/spermTheme";
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 
 function getAvatarColor(addr: string) {
   const palettes = [
@@ -57,7 +58,7 @@ export default function TopHeader() {
   }, []);
   const isNarrow = vw < 900;
   const isTiny = vw < 640;
-  const btnSize = isTiny ? 36 : isNarrow ? 40 : 52;
+  const btnSize = isTiny ? 28 : isNarrow ? 30 : 34;
 
   // Session wallet deposit inputs
   const [sessionDepositSprm, setSessionDepositSprm] = useState("5");
@@ -195,6 +196,12 @@ export default function TopHeader() {
     { icon: ShieldCheck, label: "Fairness" },
   ];
 
+  const NAV_ITEMS = [
+    { label: "PLAY",        href: "/",          active: true  },
+    { label: "LEADERBOARD", href: "/profile",    active: false },
+    { label: "FAUCET",      href: "/faucet",     active: false },
+  ];
+
   return (
     <div
       style={{
@@ -202,130 +209,107 @@ export default function TopHeader() {
         top: 0,
         left: 0,
         right: 0,
-        height: 80,
+        height: 56,
         zIndex: 200,
-        background: "transparent",
+        background: spermTheme.bgPanel,
         borderBottom: `1px solid ${spermTheme.borderChrome}`,
         display: "flex",
         alignItems: "center",
-        paddingLeft: isTiny ? 10 : 20,
+        paddingLeft: isTiny ? 10 : 16,
         paddingRight: isTiny ? 8 : 16,
-        fontFamily: "'Outfit', sans-serif",
+        gap: isTiny ? 6 : 12,
+        fontFamily: "'Inter', sans-serif",
       }}
     >
-      {/* Glass layer matching chat sidebar */}
-      <div
+      {/* ── Logo ── */}
+      <button
+        onClick={() => router.push("/")}
         style={{
-          position: "absolute",
-          inset: 0,
-          zIndex: 0,
-          overflow: "hidden",
-          pointerEvents: "none",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            inset: "-40px",
-            background:
-              "radial-gradient(120% 110% at 0% 0%, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.01) 28%, transparent 60%), radial-gradient(130% 120% at 100% 100%, rgba(32,32,36,0.45) 0%, transparent 68%)",
-            filter: "blur(18px)",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background: 'rgba(0, 0, 0, 0.4)',
-            backdropFilter: "blur(32px)",
-            WebkitBackdropFilter: "blur(32px)",
-            boxShadow: `inset 0 0 0 1px ${spermTheme.borderChrome}, inset 0 1px 0 rgba(255,255,255,0.03)`,
-          }}
-        />
-      </div>
-
-      {/* Content row */}
-      <div
-        style={{
-          position: "relative",
-          zIndex: 1,
+          flexShrink: 0,
+          border: "none",
+          cursor: "pointer",
+          padding: "0 4px",
           display: "flex",
           alignItems: "center",
-          width: "100%",
-          gap: isTiny ? 4 : 8,
-          minWidth: 0,
+          gap: 2,
+          background: "transparent",
         }}
+        type="button"
+        aria-label="Home"
       >
-        {/* Logo */}
-        <button
-          onClick={() => router.push("/")}
-          style={{
-            flexShrink: 0,
-            border: "none",
-            cursor: "pointer",
-            padding: "0 0 0 16px",
-            display: "flex",
-            alignItems: "center",
-            background: "transparent",
-          }}
-          type="button"
-          aria-label="Home"
-        >
-          <img
-            src="/spermfun-logo.png"
-            alt="Sperm Fun"
-            style={{
-              height: isTiny ? 230 : isNarrow ? 274 : 317,
-              width: "auto",
-              display: "block",
-              marginTop: 40,
-            }}
-          />
-        </button>
+        <span style={{ fontSize: isTiny ? 15 : 18, fontWeight: 800, color: spermTheme.textPrimary, letterSpacing: -0.5 }}>
+          SPRM
+        </span>
+        <span style={{ fontSize: isTiny ? 15 : 18, fontWeight: 800, color: spermTheme.accent, letterSpacing: -0.5 }}>
+          .FUN
+        </span>
+      </button>
 
-        <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
-          {avaxPrice !== null && (
-            <div
+      {/* ── Nav tabs (hidden on tiny) ── */}
+      {!isTiny && (
+        <nav style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.label}
+              onClick={() => router.push(item.href)}
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                background: "rgba(212, 170, 255, 0.05)",
-                border: `1px solid ${spermTheme.accentBorder}`,
-                borderRadius: 4,
-                padding: "8px 16px",
-                fontFamily: "'JetBrains Mono', monospace",
+                background: item.active ? spermTheme.accentSoft : "transparent",
+                border: `1px solid ${item.active ? spermTheme.accentBorder : "transparent"}`,
+                borderRadius: 6,
+                padding: "5px 12px",
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: 0.5,
+                color: item.active ? spermTheme.accentBright : spermTheme.textSecondary,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                transition: "all 0.15s",
               }}
             >
-              <div
-                style={{
-                  width: 5,
-                  height: 5,
-                  borderRadius: "50%",
-                  background: spermTheme.accent,
-                  boxShadow: `0 0 10px ${spermTheme.accent}`,
-                  animation: "pulse 2s infinite",
-                }}
-              />
-              <span style={{ fontSize: 10, color: "rgba(245, 245, 242, 0.6)", fontWeight: 700, letterSpacing: 0.5 }}>AVAX</span>
-              <span style={{ fontSize: 14, color: "#fff", fontWeight: 900 }}>${avaxPrice.toFixed(6)}</span>
-              <style>{`
-                @keyframes pulse {
-                  0% { opacity: 0.4; transform: scale(0.8); }
-                  50% { opacity: 1; transform: scale(1.1); }
-                  100% { opacity: 0.4; transform: scale(0.8); }
-                }
-              `}</style>
-            </div>
-          )}
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {/* ── Spacer ── */}
+      <div style={{ flex: 1 }} />
+
+      {/* ── AVAX Live price ── */}
+      {avaxPrice !== null && !isTiny && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            background: "rgba(139,92,246,0.06)",
+            border: `1px solid ${spermTheme.borderAccent}`,
+            borderRadius: 6,
+            padding: "5px 10px",
+            fontFamily: "'JetBrains Mono', monospace",
+          }}
+        >
+          <div
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: spermTheme.success,
+              boxShadow: `0 0 6px ${spermTheme.success}`,
+              animation: "pulse-dot 2s infinite",
+            }}
+          />
+          <span style={{ fontSize: 10, color: spermTheme.textSecondary, fontWeight: 600, letterSpacing: 0.5 }}>AVAX</span>
+          <span style={{ fontSize: 13, color: spermTheme.textPrimary, fontWeight: 700 }}>${avaxPrice.toFixed(2)}</span>
         </div>
+      )}
 
         {/* ── RIGHT CLUSTER ── */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: isTiny ? 3 : 6,
+            gap: isTiny ? 4 : 8,
             minWidth: 0,
           }}
         >
@@ -352,19 +336,16 @@ export default function TopHeader() {
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: isTiny ? 5 : 12,
-                      background: "rgba(255,255,255,0.02)",
+                      gap: isTiny ? 4 : 8,
+                      background: walletOpen ? spermTheme.accentSoft : spermTheme.bgCard,
                       border: `1px solid ${walletOpen ? spermTheme.accentBorder : spermTheme.borderChrome}`,
-                      borderRadius: 8,
-                      padding: isTiny ? "0 10px" : "0 18px",
+                      borderRadius: 7,
+                      padding: isTiny ? "0 8px" : "0 12px",
                       height: btnSize,
                       color: "#fff",
                       cursor: "pointer",
                       fontFamily: "'JetBrains Mono', monospace",
-                      transition: "all 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
-                      boxShadow: walletOpen
-                        ? `0 0 30px ${spermTheme.accent}15`
-                        : "none",
+                      transition: "all 0.15s ease",
                       minWidth: 0,
                       overflow: "hidden",
                     }}
@@ -372,15 +353,15 @@ export default function TopHeader() {
                     {!isTiny && (
                       <div
                         style={{
-                          width: 30,
-                          height: 30,
-                          borderRadius: 8,
+                          width: 22,
+                          height: 22,
+                          borderRadius: 5,
                           flexShrink: 0,
                           background: headerBg,
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          fontSize: 15,
+                          fontSize: 11,
                           overflow: "hidden",
                         }}
                       >
@@ -408,8 +389,8 @@ export default function TopHeader() {
                       </div>
                       <div
                         style={{
-                          fontSize: isTiny ? 14 : isNarrow ? 16 : 20,
-                          fontWeight: 900,
+                          fontSize: isTiny ? 11 : 13,
+                          fontWeight: 700,
                           color: headerColor,
                           fontFamily: "inherit",
                           lineHeight: 1,
@@ -418,7 +399,7 @@ export default function TopHeader() {
                           textOverflow: "ellipsis",
                         }}
                       >
-                        ≈ {headerBal}
+                        {headerBal} SPRM
                       </div>
                     </div>
                     <ChevronDown
@@ -440,7 +421,7 @@ export default function TopHeader() {
                         width: 320,
                         borderRadius: 8,
                         border: `1px solid ${spermTheme.borderChrome}`,
-                        background: 'rgba(0, 0, 0, 0.85)',
+                        background: spermTheme.bgPanel,
                         backdropFilter: "blur(32px)",
                         WebkitBackdropFilter: "blur(32px)",
                         boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
@@ -1004,13 +985,13 @@ export default function TopHeader() {
                 audioRef.current.play().catch(() => { });
             }}
             style={{
-              background: "rgba(245,245,242,0.06)",
-              border: "1px solid rgba(245,245,242,0.14)",
-              borderRadius: isTiny ? 8 : 12,
+              background: spermTheme.bgCard,
+              border: `1px solid ${spermTheme.borderChrome}`,
+              borderRadius: 6,
               height: btnSize,
               width: btnSize,
               cursor: "pointer",
-              color: "rgba(245,245,242,0.9)",
+              color: spermTheme.textSecondary,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -1019,23 +1000,23 @@ export default function TopHeader() {
             title={muted ? "Unmute" : "Mute"}
           >
             {muted ? (
-              <VolumeX size={isTiny ? 16 : 22} />
+              <VolumeX size={14} />
             ) : (
-              <Volume2 size={isTiny ? 16 : 22} />
+              <Volume2 size={14} />
             )}
           </button>
 
-          {/* Bell — hidden on very small screens */}
+          {/* Bell — hidden on small screens */}
           {!isTiny && (
             <button
               style={{
-                background: "rgba(245,245,242,0.06)",
-                border: "1px solid rgba(245,245,242,0.14)",
-                borderRadius: isNarrow ? 8 : 12,
+                background: spermTheme.bgCard,
+                border: `1px solid ${spermTheme.borderChrome}`,
+                borderRadius: 6,
                 height: btnSize,
                 width: btnSize,
                 cursor: "pointer",
-                color: "rgba(245,245,242,0.9)",
+                color: spermTheme.textSecondary,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -1043,17 +1024,17 @@ export default function TopHeader() {
                 position: "relative",
               }}
             >
-              <Bell size={isNarrow ? 16 : 22} />
+              <Bell size={14} />
               <div
                 style={{
                   position: "absolute",
-                  top: 9,
-                  right: 10,
-                  width: 8,
-                  height: 8,
+                  top: 6,
+                  right: 6,
+                  width: 6,
+                  height: 6,
                   borderRadius: "50%",
-                  background: "#C58CFF",
-                  border: "1.5px solid rgba(15,12,26,0.9)",
+                  background: spermTheme.accent,
+                  border: `1.5px solid ${spermTheme.bgPanel}`,
                 }}
               />
             </button>
@@ -1067,13 +1048,11 @@ export default function TopHeader() {
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: isTiny ? 4 : 8,
-                  background: profileOpen
-                    ? "rgba(197,140,255,0.14)"
-                    : "rgba(245,245,242,0.08)",
-                  border: `1px solid rgba(245,245,242,${profileOpen ? "0.38" : "0.20"})`,
-                  borderRadius: isTiny ? 8 : 12,
-                  padding: isTiny ? "0 6px 0 4px" : "0 10px 0 6px",
+                  gap: 6,
+                  background: profileOpen ? spermTheme.accentSoft : spermTheme.bgCard,
+                  border: `1px solid ${profileOpen ? spermTheme.accentBorder : spermTheme.borderChrome}`,
+                  borderRadius: 7,
+                  padding: "0 8px 0 4px",
                   height: btnSize,
                   cursor: "pointer",
                   color: "#fff",
@@ -1081,52 +1060,28 @@ export default function TopHeader() {
                   transition: "all 0.15s",
                 }}
               >
-                {/* Avatar circle */}
+                {/* Avatar */}
                 <div
                   style={{
-                    width: isTiny ? 28 : 40,
-                    height: isTiny ? 28 : 40,
-                    borderRadius: isTiny ? 8 : 11,
+                    width: isTiny ? 22 : 24,
+                    height: isTiny ? 22 : 24,
+                    borderRadius: 5,
                     flexShrink: 0,
                     background: `linear-gradient(135deg, ${av1}, ${av2})`,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: isTiny ? 11 : 16,
+                    fontSize: 10,
                     fontWeight: 800,
-                    color: "rgba(10,7,18,0.62)",
-                    position: "relative",
+                    color: "rgba(10,7,18,0.7)",
                   }}
                 >
                   {initials}
-                  {/* Level badge */}
-                  {!isTiny && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        bottom: -6,
-                        right: -6,
-                        width: 18,
-                        height: 18,
-                        borderRadius: "50%",
-                        background: "#C58CFF",
-                        border: "2px solid rgba(15,12,26,0.9)",
-                        fontSize: 9,
-                        fontWeight: 900,
-                        color: "#0A0712",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      1
-                    </div>
-                  )}
                 </div>
                 <ChevronDown
-                  size={isTiny ? 12 : 15}
+                  size={12}
                   style={{
-                    color: "rgba(245,245,242,0.46)",
+                    color: spermTheme.textSecondary,
                     transform: profileOpen ? "rotate(180deg)" : "none",
                     transition: "transform 0.15s",
                   }}
@@ -1344,28 +1299,95 @@ export default function TopHeader() {
               )}
             </div>
           ) : (
-            /* Connect Wallet button for EVM (replaces WalletMultiButton) */
-            <button
-              onClick={connect}
-              style={{
-                background: spermTheme.accentSoft,
-                border: `1px solid ${spermTheme.accentBorder}`,
-                borderRadius: isTiny ? 8 : 10,
-                fontSize: isTiny ? 10 : 12,
-                height: btnSize,
-                padding: isTiny ? "0 8px" : "0 16px",
-                fontFamily: "inherit",
-                color: spermTheme.accent,
-                cursor: "pointer",
-                fontWeight: 700,
-                whiteSpace: "nowrap",
+            /* Connect Wallet button for EVM (handled by RainbowKit) */
+            <ConnectButton.Custom>
+              {({
+                account,
+                chain,
+                openAccountModal,
+                openChainModal,
+                openConnectModal,
+                authenticationStatus,
+                mounted,
+              }) => {
+                const ready = mounted && authenticationStatus !== 'loading';
+                const hasConnected =
+                  ready &&
+                  account &&
+                  chain &&
+                  (!authenticationStatus ||
+                    authenticationStatus === 'authenticated');
+                return (
+                  <div
+                    {...(!ready && {
+                      'aria-hidden': true,
+                      style: {
+                        opacity: 0,
+                        pointerEvents: 'none',
+                        userSelect: 'none',
+                      },
+                    })}
+                  >
+                    {(() => {
+                      if (!hasConnected) {
+                        return (
+                          <button
+                            onClick={openConnectModal}
+                            type="button"
+                            style={{
+                              background: `linear-gradient(135deg, ${spermTheme.accent}, ${spermTheme.accentBright})`,
+                              border: "none",
+                              borderRadius: 7,
+                              fontSize: 12,
+                              height: btnSize,
+                              padding: isTiny ? "0 10px" : "0 16px",
+                              fontFamily: "inherit",
+                              color: "#fff",
+                              cursor: "pointer",
+                              fontWeight: 600,
+                              whiteSpace: "nowrap",
+                              boxShadow: `0 4px 14px ${spermTheme.accentGlow}`,
+                            }}
+                          >
+                            Connect Wallet
+                          </button>
+                        );
+                      }
+                      if (chain.unsupported) {
+                        return (
+                          <button
+                            onClick={openChainModal}
+                            type="button"
+                            style={{
+                              background: 'rgba(227,150,170,0.12)',
+                              border: '1px solid rgba(227,150,170,0.45)',
+                              borderRadius: isTiny ? 8 : 10,
+                              fontSize: isTiny ? 10 : 12,
+                              height: btnSize,
+                              padding: isTiny ? "0 8px" : "0 16px",
+                              fontFamily: "inherit",
+                              color: spermTheme.error,
+                              cursor: "pointer",
+                              fontWeight: 700,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Wrong Network
+                          </button>
+                        );
+                      }
+                      return (
+                        <div style={{ display: 'flex', gap: 12 }}>
+                          {/* Add native balance here if desired in the future */}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
               }}
-            >
-              Connect Wallet
-            </button>
+            </ConnectButton.Custom>
           )}
         </div>
-      </div>
     </div>
   );
 }

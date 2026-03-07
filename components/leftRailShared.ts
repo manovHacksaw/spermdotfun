@@ -1,10 +1,10 @@
 import type { CSSProperties } from 'react'
 import { spermTheme } from '@/components/theme/spermTheme'
 
-export const TOP_HEADER_HEIGHT = 80
+export const TOP_HEADER_HEIGHT = 56
 export const MOBILE_BREAKPOINT = 640
 export const LEFT_RAIL_BREAKPOINT = 1200
-export const CHAT_PANEL_WIDTH = 280
+export const CHAT_PANEL_WIDTH = 260
 export const BET_PANEL_WIDTH = 300
 export const SINGLE_PANEL_WIDTH = 300
 export const DUAL_PANEL_WIDTH = CHAT_PANEL_WIDTH + BET_PANEL_WIDTH

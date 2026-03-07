@@ -381,6 +381,7 @@ export default function StockGrid() {
 
 
     // 5. Pointer — sperm shape (anatomical head + fluid tail)
+    if (s.history.length === 0) return
     const last2 = s.history[s.history.length - 1]
     const dotX = last2.x * zoom - viewX
 
@@ -837,20 +838,38 @@ export default function StockGrid() {
             s.vrfPath.set(colX, row)
           }
 
-          // Resolve any pending selections whose column is now revealed
+          // Resolve pending selections speculatively.
+          // RULE: Only mark definitive LOSES (head never crossed that row).
+          //       WINS are NOT shown here — they are confirmed by the server's bet_resolved.
+          //       This prevents the visual tail from causing false WIN flashes.
           const now2 = Date.now()
           for (const [key, sel] of s.selections) {
-            if (sel.result !== 'pending') continue
-            const winRow = s.vrfPath.get(sel.colX)
-            if (winRow === undefined) continue
-            // Only resolve if pointer has passed this column
             if (s.currentX < sel.colX + COLUMN_WIDTH_BASE) continue
-            sel.result = (sel.row === winRow) ? 'win' : 'lose'
-            sel.resultTime = now2
-            s.lastResult = sel.result
-            s.lastResultTime = now2
-            const k = key
-            setTimeout(() => { s.selections.delete(k) }, 3000)
+            if (sel.result !== 'pending') continue
+
+            const visited = s.visitedCols.get(sel.colX)
+            if (visited) {
+              // No padding: only the exact head path counts
+              const missedHead = sel.row < visited.minRow || sel.row > visited.maxRow
+              if (missedHead) {
+                sel.result = 'lose'
+                sel.resultTime = now2
+                s.lastResult = 'lose'
+                s.lastResultTime = now2
+                setTimeout(() => { s.selections.delete(key) }, 3000)
+              }
+              // potential win — leave pending for server to confirm
+            } else {
+              const winRow = s.vrfPath.get(sel.colX)
+              if (winRow === undefined) continue
+              if (sel.row !== winRow) {
+                sel.result = 'lose'
+                sel.resultTime = now2
+                s.lastResult = 'lose'
+                s.lastResultTime = now2
+                setTimeout(() => { s.selections.delete(key) }, 3000)
+              }
+            }
           }
 
         } else if (data.type === 'bet_resolved') {
@@ -859,9 +878,12 @@ export default function StockGrid() {
           const sel = s.selections.get(key)
           const now2 = Date.now()
           const result = data.won ? 'win' as const : 'lose' as const
-          if (sel && sel.result === 'pending') {
-            sel.result = result
-            sel.resultTime = now2
+          if (sel) {
+            // Allow server to override a speculative "lose" into a "win"
+            if (sel.result === 'pending' || (sel.result === 'lose' && result === 'win')) {
+              sel.result = result
+              sel.resultTime = now2
+            }
           }
           // Only show toast for bets belonging to this wallet (primary or session)
           const isMyBet = (walletRef.current && data.user === walletRef.current) ||
@@ -875,6 +897,10 @@ export default function StockGrid() {
           // Notify sidebar — leaderboard data comes from server via 'leaderboard' message
           console.log(`[LB] bet_resolved user=${(data.user as string)?.slice(0, 8)} won=${data.won} payout=${data.payout ?? 0}`)
           window.dispatchEvent(new CustomEvent('sprmfun:betresult', { detail: data }))
+
+        } else if (data.type === 'bet_receipt') {
+          // Server finished on-chain resolution
+          window.dispatchEvent(new CustomEvent('sprmfun:betreceipt', { detail: data }))
 
         } else if (data.type === 'vault_balance') {
           // Relay off-chain balance to hooks/HUD
