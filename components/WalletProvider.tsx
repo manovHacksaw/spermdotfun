@@ -1,28 +1,23 @@
 'use client'
 
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import React, { createContext, useContext, useEffect, useState, useMemo, type ReactNode } from 'react'
 import { ethers } from 'ethers'
+import { useAccount, useWalletClient, usePublicClient, useDisconnect, useSwitchChain, useChainId } from 'wagmi'
+import { useConnectModal } from '@rainbow-me/rainbowkit'
 
 // ── Avalanche Fuji network ────────────────────────────────────────────────────
 export const FUJI_CHAIN_ID = 43113
-export const FUJI_PARAMS = {
-  chainId:           '0xA869',
-  chainName:         'Avalanche Fuji Testnet',
-  nativeCurrency:    { name: 'AVAX', symbol: 'AVAX', decimals: 18 },
-  rpcUrls:           [process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL ?? 'https://api.avax-test.network/ext/bc/C/rpc'],
-  blockExplorerUrls: ['https://testnet.snowtrace.io'],
-}
 
 // ── Context type ──────────────────────────────────────────────────────────────
 export interface EvmWalletState {
-  address:      string | null
-  connected:    boolean
-  provider:     ethers.BrowserProvider | null
-  signer:       ethers.JsonRpcSigner | null
-  chainId:      number | null
+  address: string | null
+  connected: boolean
+  provider: ethers.BrowserProvider | ethers.JsonRpcProvider | ethers.FallbackProvider | null
+  signer: ethers.JsonRpcSigner | null
+  chainId: number | null
   wrongNetwork: boolean
-  connect:      () => Promise<void>
-  disconnect:   () => void
+  connect: () => Promise<void>
+  disconnect: () => void
   switchToFuji: () => Promise<void>
 }
 
@@ -34,80 +29,102 @@ export function useEvmWallet(): EvmWalletState {
   return ctx
 }
 
+// ── Viem -> Ethers Adapters ───────────────────────────────────────────────────
+export function publicClientToProvider(publicClient: any) {
+  const { chain, transport } = publicClient
+  const network = {
+    chainId: chain?.id || FUJI_CHAIN_ID,
+    name: chain?.name || 'Avalanche Fuji',
+    ensAddress: chain?.contracts?.ensRegistry?.address,
+  }
+  if (transport.type === 'fallback') {
+    const providers = (transport.transports as ReturnType<any>[]).map(
+      ({ value }) => new ethers.JsonRpcProvider(value?.url, network)
+    )
+    if (providers.length === 1) return providers[0]
+    return new ethers.FallbackProvider(providers)
+  }
+  return new ethers.JsonRpcProvider(transport.url, network)
+}
+
+export function walletClientToSigner(walletClient: any) {
+  const { account, chain, transport } = walletClient
+  const network = {
+    chainId: chain?.id || FUJI_CHAIN_ID,
+    name: chain?.name || 'Avalanche Fuji',
+    ensAddress: chain?.contracts?.ensRegistry?.address,
+  }
+  const provider = new ethers.BrowserProvider(transport, network)
+  return new ethers.JsonRpcSigner(provider, account.address)
+}
+
 // ── Provider ──────────────────────────────────────────────────────────────────
 export default function WalletContextProvider({ children }: { children: ReactNode }) {
-  const [address,  setAddress]  = useState<string | null>(null)
-  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null)
-  const [signer,   setSigner]   = useState<ethers.JsonRpcSigner | null>(null)
-  const [chainId,  setChainId]  = useState<number | null>(null)
+  const { address, isConnected } = useAccount()
+  const chainId = useChainId()
+  const publicClient = usePublicClient()
+  const { data: walletClient } = useWalletClient()
+  const { disconnect } = useDisconnect()
+  const { switchChainAsync } = useSwitchChain()
+  const { openConnectModal } = useConnectModal()
 
-  const connected    = !!address
-  const wrongNetwork = connected && chainId !== FUJI_CHAIN_ID
+  const [provider, setProvider] = useState<ethers.BrowserProvider | ethers.JsonRpcProvider | ethers.FallbackProvider | null>(null)
+  const [signer, setSigner] = useState<ethers.JsonRpcSigner | null>(null)
 
-  const switchToFuji = useCallback(async () => {
-    if (typeof window === 'undefined' || !window.ethereum) return
-    try {
-      await (window.ethereum as any).request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: '0xA869' }],
-      })
-    } catch (e: any) {
-      if (e.code === 4902) {
-        await (window.ethereum as any).request({
-          method: 'wallet_addEthereumChain',
-          params: [FUJI_PARAMS],
-        })
+  const wrongNetwork = isConnected && chainId !== FUJI_CHAIN_ID
+
+  const switchToFuji = async () => {
+    if (switchChainAsync) {
+      try {
+        await switchChainAsync({ chainId: FUJI_CHAIN_ID })
+      } catch (e) {
+        console.error('Failed to switch chain:', e)
       }
     }
-  }, [])
+  }
 
-  const connect = useCallback(async () => {
-    if (typeof window === 'undefined' || !(window as any).ethereum) {
-      alert('MetaMask not found — install it at metamask.io')
-      return
+  const handleConnect = async () => {
+    if (openConnectModal) {
+      openConnectModal()
     }
-    const prov = new ethers.BrowserProvider((window as any).ethereum)
-    await prov.send('eth_requestAccounts', [])
-    const net = await prov.getNetwork()
-    if (Number(net.chainId) !== FUJI_CHAIN_ID) await switchToFuji()
-    const s    = await prov.getSigner()
-    const addr = await s.getAddress()
-    const net2 = await prov.getNetwork()
-    setProvider(prov)
-    setSigner(s)
-    setAddress(addr)
-    setChainId(Number(net2.chainId))
-  }, [switchToFuji])
+  }
 
-  const disconnect = useCallback(() => {
-    setProvider(null); setSigner(null); setAddress(null); setChainId(null)
-  }, [])
+  const handleDisconnect = () => {
+    disconnect()
+  }
 
-  // Auto-reconnect on page load
   useEffect(() => {
-    const eth = (window as any).ethereum
-    if (!eth) return
-    const prov = new ethers.BrowserProvider(eth)
-    prov.send('eth_accounts', []).then(async (accounts: string[]) => {
-      if (!accounts.length) return
-      const s   = await prov.getSigner()
-      const net = await prov.getNetwork()
-      setProvider(prov)
-      setSigner(s)
-      setAddress(accounts[0])
-      setChainId(Number(net.chainId))
-    }).catch(() => {})
+    if (publicClient) {
+      setProvider(publicClientToProvider(publicClient))
+    } else {
+      setProvider(null)
+    }
+  }, [publicClient])
 
-    const onAccounts = (accs: string[]) => accs.length ? setAddress(accs[0]) : disconnect()
-    const onChain    = (cId: string)    => setChainId(parseInt(cId, 16))
-    eth.on('accountsChanged', onAccounts)
-    eth.on('chainChanged',    onChain)
-    return () => { eth.removeListener('accountsChanged', onAccounts); eth.removeListener('chainChanged', onChain) }
-  }, [disconnect])
+  useEffect(() => {
+    if (walletClient) {
+      setSigner(walletClientToSigner(walletClient))
+    } else {
+      setSigner(null)
+    }
+  }, [walletClient])
+
+  const contextValue = useMemo(() => ({
+    address: address ? (address as string) : null,
+    connected: isConnected,
+    provider,
+    signer,
+    chainId: chainId || null,
+    wrongNetwork,
+    connect: handleConnect,
+    disconnect: handleDisconnect,
+    switchToFuji,
+  }), [address, isConnected, provider, signer, chainId, wrongNetwork, switchChainAsync, openConnectModal, disconnect])
 
   return (
-    <EvmWalletContext.Provider value={{ address, connected, provider, signer, chainId, wrongNetwork, connect, disconnect, switchToFuji }}>
+    <EvmWalletContext.Provider value={contextValue}>
       {children}
     </EvmWalletContext.Provider>
   )
 }
+

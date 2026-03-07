@@ -41,7 +41,10 @@ function randomMult() {
 
 // ── Avalanche / EVM setup ──────────────────────────────────────────────────────
 const RPC_URL = process.env.AVALANCHE_RPC_URL || "https://api.avax-test.network/ext/bc/C/rpc";
+const WS_RPC_URL = process.env.AVALANCHE_WS_RPC_URL || "wss://api.avax-test.network/ext/bc/C/ws";
 const GAME_ADDRESS = process.env.GAME_CONTRACT_ADDRESS || "";
+// Set VRF_ENABLED=true only when deploying a contract with requestVrf() support (SprmfunGame, not SprmGameSimple)
+const VRF_ENABLED = process.env.VRF_ENABLED === "true";
 
 // Minimal ABI — only the functions/events the server uses
 const GAME_ABI = [
@@ -76,6 +79,9 @@ function initEvm() {
   evmProvider = new ethers.JsonRpcProvider(RPC_URL);
   serverWallet = new ethers.Wallet(privateKey, evmProvider);
   gameContract = new ethers.Contract(GAME_ADDRESS, GAME_ABI, serverWallet);
+  // Separate WebSocket provider for event subscriptions — avoids eth_filter expiry on Fuji HTTP RPC
+  const wsProvider = new ethers.WebSocketProvider(WS_RPC_URL);
+  gameContract._wsContract = new ethers.Contract(GAME_ADDRESS, GAME_ABI, wsProvider);
 
 
   onchainReady = true;
@@ -443,12 +449,25 @@ function refreshVrfLocally(startColX) {
   pendingVrfStartColX = startColX;
   lastVrfColX = startColX;
 
-  if (gameContract) {
+  if (gameContract && VRF_ENABLED) {
     // Don't block — fire and forget. VRF result arrives via VrfFulfilled event.
     vrfRequestPending = true;
-    gameContract.requestVrf()
-      .then((tx) => {
-        console.log(`[VRF] requestVrf tx=${tx.hash} startColX=${startColX}`);
+    gameContract.isVrfPending()
+      .then((alreadyPending) => {
+        if (alreadyPending) {
+          // Chainlink is already processing a request — seed locally so the game
+          // keeps running; VrfFulfilled event will override when it arrives.
+          console.log("[VRF] contract already has a pending request, using local seed until fulfilled");
+          currentVrfResult = crypto.randomBytes(32);
+          currentSeedIndex++;
+          vrfRequestPending = true; // still waiting for the on-chain fulfillment
+          populateVrfPathLocally(startColX);
+          return;
+        }
+        return gameContract.requestVrf()
+          .then((tx) => {
+            console.log(`[VRF] requestVrf tx=${tx.hash} startColX=${startColX}`);
+          });
       })
       .catch((e) => {
         console.error("[VRF] requestVrf failed — using local fallback:", e.message);
@@ -469,8 +488,10 @@ function refreshVrfLocally(startColX) {
 
 // ── Subscribe to VrfFulfilled events from the contract ─────────────────────────
 function subscribeVrfEvents() {
-  if (!gameContract) return;
-  gameContract.on("VrfFulfilled", (epochId, requestId, vrfResult) => {
+  if (!gameContract || !VRF_ENABLED) return;
+  // Use WebSocket contract if available (avoids eth_filter expiry on HTTP RPC)
+  const sub = gameContract._wsContract || gameContract;
+  sub.on("VrfFulfilled", (epochId, requestId, vrfResult) => {
     console.log(`[VRF] Fulfilled: epochId=${epochId} requestId=${requestId}`);
     // vrfResult is bytes32 from contract — use directly as entropy
     currentVrfResult = Buffer.from(vrfResult.slice(2), "hex"); // strip 0x
@@ -481,7 +502,7 @@ function subscribeVrfEvents() {
 
     broadcast(JSON.stringify({ type: "vrf_state", seedIndex: currentSeedIndex }));
   });
-  console.log("[VRF] Subscribed to VrfFulfilled events");
+  console.log("[VRF] Subscribed to VrfFulfilled events (WebSocket)");
 }
 
 // ── Populate vrfPath with current seed (always local on EVM) ────────────────────
@@ -522,19 +543,34 @@ async function resolveBet(betKey) {
     return;
   }
 
-  const won = info.box_row >= range.minRow && info.box_row <= range.maxRow;
+  const hitPadding = 2; // Increase hit box size by 2 rows up and down for visual forgiveness
+  const hitMin = range.minRow - hitPadding;
+  const hitMax = range.maxRow + hitPadding;
+
+  const won = info.box_row >= hitMin && info.box_row <= hitMax;
   const winRow = won ? info.box_row : info.box_row === 0 ? 1 : 0;
   const payout = won ? ((info.bet_amount * info.mult_num) / 100) * 0.98 : 0;
 
-  let txHash = null;
+  // Optimistic instant response (txHash = "pending")
+  broadcast(JSON.stringify({
+    type: "bet_resolved",
+    betPda: betKey,
+    user: info.user,
+    won,
+    payout,
+    txHash: "pending",
+    box_x: info.box_x,
+    box_row: info.box_row,
+    min_row: range.minRow,
+    max_row: range.maxRow,
+  }));
 
   if (gameContract && info.betId) {
-    try {
-      const winAmount = BigInt(Math.floor(payout));
-      const betAmount = BigInt(info.bet_amount);
-      // ── On-chain fallback (optional/debug) ──────────────────────────────
-      if (onchainReady && gameContract && info.betId) {
-        try {
+    // Process on-chain transaction completely async
+    (async () => {
+      let finalTxHash = null;
+      try {
+        if (onchainReady) {
           const betId = BigInt(info.betId);
           const msgHash = ethers.solidityPackedKeccak256(
             ["uint256", "bool", "address"],
@@ -545,42 +581,35 @@ async function resolveBet(betKey) {
           console.log(`[BET] Resolving on-chain: betId=${betId} won=${won}`);
           const tx = await gameContract.resolveBet(betId, won, serverSig);
           const receipt = await tx.wait();
-          txHash = receipt.hash;
-          console.log(`[BET] ✓ Resolved on-chain: tx=${txHash}`);
-        } catch (onChainErr) {
-          console.error("[BET] on-chain resolveBet failed:", onChainErr.message);
+          finalTxHash = receipt.hash;
+          console.log(`[BET] ✓ Resolved on-chain: tx=${finalTxHash}`);
         }
-      }
-      // ── Broadcast to user ───────────────────────────────────────────────
-      broadcast(JSON.stringify({
-        type: "bet_resolved",
-        betPda: betKey,
-        user: info.user,
-        won,
-        payout,
-        txHash, // This will be null if only off-chain, or the hash if on-chain
-        box_x: info.box_x,
-        box_row: info.box_row,
-      }));
 
-      profileService.enqueueResolvedBet({
-        txSignature: txHash || "off-chain",
-        eventIndex: 0,
-        betPda: betKey,
-        sourceWallet: info.user,
-        game: "crash",
-        boxX: info.box_x,
-        boxRow: info.box_row,
-        winningRow: winRow,
-        won,
-        betAmount: info.bet_amount,
-        payout,
-        seedIndex: currentSeedIndex,
-      });
-    } catch (err) {
-      console.error("[BET] on-chain resolveBet error:", err.message);
-      broadcast(
-        JSON.stringify({
+        // Broadcast final receipt
+        broadcast(JSON.stringify({
+          type: "bet_receipt",
+          betPda: betKey,
+          user: info.user,
+          txHash: finalTxHash,
+        }));
+
+        profileService.enqueueResolvedBet({
+          txSignature: finalTxHash || "off-chain",
+          eventIndex: 0,
+          betPda: betKey,
+          sourceWallet: info.user,
+          game: "crash",
+          boxX: info.box_x,
+          boxRow: info.box_row,
+          winningRow: winRow,
+          won,
+          betAmount: info.bet_amount,
+          payout,
+          seedIndex: currentSeedIndex,
+        });
+      } catch (err) {
+        console.error("[BET] on-chain resolveBet error:", err.message);
+        broadcast(JSON.stringify({
           type: "bet_resolve_failed",
           betPda: betKey,
           user: info.user,
@@ -588,42 +617,22 @@ async function resolveBet(betKey) {
           box_row: info.box_row,
           bet_amount: info.bet_amount,
           error: err.message?.slice(0, 200) ?? "Unknown error",
-        }),
-      );
-      return;
-    }
+          min_row: range.minRow,
+          max_row: range.maxRow,
+        }));
+      }
+    })();
   } else {
-    console.log(
-      `[BET] Off-chain resolution (no contract/betId): betKey=${betKey} won=${won}`,
-    );
+    console.log(`[BET] Off-chain resolution (no contract/betId): betKey=${betKey} won=${won}`);
   }
 
-  console.log(
-    `[BET] ${won ? "🏆 WIN" : "✗ LOSE"} betKey=${betKey} payout=${payout.toFixed(4)}`,
-  );
+  console.log(`[BET] ${won ? "🏆 WIN" : "✗ LOSE"} betKey=${betKey} payout=${payout.toFixed(4)}`);
 
   if (info.user) {
     updateLeaderboard(info.user, info.bet_amount, payout, won);
     broadcast(JSON.stringify(leaderboardPayload()));
   }
   broadcastActivePlayers();
-
-  broadcast(
-    JSON.stringify({
-      type: "bet_resolved",
-      betPda: betKey,
-      user: info.user,
-      box_x: info.box_x,
-      box_row: info.box_row,
-      winning_row: winRow,
-      won,
-      bet_amount: info.bet_amount,
-      payout,
-      tx_signature: txHash,
-      seed_index: currentSeedIndex,
-      timestamp: Date.now(),
-    }),
-  );
 }
 
 // ── Column factory ──────────────────────────────────────────────────────────────
@@ -982,12 +991,15 @@ app.prepare().then(async () => {
             const betColX = Math.floor(msg.box_x / COLUMN_WIDTH) * COLUMN_WIDTH;
             const curColX = Math.floor(serverCurrentX / COLUMN_WIDTH) * COLUMN_WIDTH;
             const colsAhead = (betColX - curColX) / COLUMN_WIDTH;
-            if (colsAhead < 10) {
+            // Relaxed the colsAhead check from 10 to -200.
+            // Blockchain mining can take seconds, during which the pointer advances.
+            // If the user paid for the bet (verified by betId), we must register it even if it arrives late.
+            if (colsAhead < -200) {
               console.warn(
-                `[BET] REJECTED (too close): box_x=${msg.box_x} colsAhead=${colsAhead}`,
+                `[BET] REJECTED (too historically detached): box_x=${msg.box_x} colsAhead=${colsAhead}`,
               );
               res.writeHead(400, { "Content-Type": "application/json" });
-              res.end(JSON.stringify({ error: "Bet too close — try a further column" }));
+              res.end(JSON.stringify({ error: "Bet registration too historically detached" }));
               return;
             }
             pendingBets.set(betKey, {
@@ -1049,9 +1061,9 @@ app.prepare().then(async () => {
     historyBuffer.push({ x: serverCurrentX, y });
     if (historyBuffer.length > HISTORY_SIZE) historyBuffer.shift();
 
-    // tickRow must match box.row convention (row 0=bottom, row 999=top).
-    // Mapping: y=0 maps to row 500. Each 1.0 y units is 30 rows.
-    const tickRow = Math.max(0, Math.min(999, Math.floor(y * 30) + 500));
+    // tickRow must match box.row convention (row 0=bottom, row 499=top).
+    // Mapping: y=0 maps to row 250. Each 1.0 y units is 30 rows.
+    const tickRow = Math.max(0, Math.min(499, Math.floor(y * 30) + 250));
     const existing = columnRowRange.get(curColX);
     if (!existing) {
       columnRowRange.set(curColX, { minRow: tickRow, maxRow: tickRow });
