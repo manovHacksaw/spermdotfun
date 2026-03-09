@@ -277,9 +277,10 @@ const vrfPath = new Map();
 let currentAvaxPrice = 0;
 let lastPrice = 0;
 let priceBaseline = 0;
-const PRICE_CHAOS_FACTOR = 142.5; // Reduced by 5% (was 150.0)
-const FRICTION = 0.94;           // Drag to prevent infinite sliding
-const MOMENTUM_INERTIA = 0.114;  // Reduced by 5% (was 0.12)
+const PRICE_CHAOS_FACTOR = 75.0;  // Halved for stability — was 142.5
+const FRICTION = 0.88;           // More damping to drain velocity faster — was 0.94
+const MOMENTUM_INERTIA = 0.10;   // Slightly reduced — was 0.114
+const MAX_SIM_VELOCITY = 0.25;   // Hard cap to prevent sudden lurches
 
 function initBinance() {
   const ws = new WebSocket("wss://stream.binance.com:9443/ws/avaxusdt@ticker");
@@ -352,6 +353,7 @@ function stepSim() {
 
     // Apply "Force" to velocity: Price Delta * Chaos * Inertia
     simVelocity = (simVelocity * FRICTION) + (priceDelta * PRICE_CHAOS_FACTOR * MOMENTUM_INERTIA);
+    simVelocity = Math.max(-MAX_SIM_VELOCITY, Math.min(MAX_SIM_VELOCITY, simVelocity));
 
     if (isFlat) {
       // Price has been constant — inject escalating unpredictable turbulence.
@@ -360,12 +362,12 @@ function stepSim() {
       const chaosStrength = Math.min(3.0, 1.0 + flatSecs * 0.4);
 
       // Continuous random micro-noise (replaces the deterministic sin-jitter)
-      simVelocity += (Math.random() - 0.5) * 0.003 * chaosStrength;
+      simVelocity += (Math.random() - 0.5) * 0.0015 * chaosStrength;
 
       // Periodic velocity shocks — sudden direction reversals every ~18 ticks
       if (simTime % CHAOS_SHOCK_INTERVAL === 0) {
         const shockDir = Math.random() < 0.5 ? 1 : -1;
-        simVelocity += shockDir * (0.015 + Math.random() * 0.025) * chaosStrength;
+        simVelocity += shockDir * (0.008 + Math.random() * 0.012) * chaosStrength;
         console.log(`[SIM] flat=${flatMs}ms shock dir=${shockDir > 0 ? '↑' : '↓'} strength=${chaosStrength.toFixed(2)}`);
       }
     } else {

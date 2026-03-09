@@ -6,7 +6,7 @@ import {
     getDefaultConfig,
     darkTheme,
 } from '@rainbow-me/rainbowkit';
-import { State, WagmiProvider } from 'wagmi';
+import { State, WagmiProvider, cookieStorage, createStorage } from 'wagmi';
 import { avalancheFuji } from 'wagmi/chains';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '@rainbow-me/rainbowkit/styles.css';
@@ -28,6 +28,9 @@ function makeConfig() {
         projectId: 'd3f6d7e0d37d1e846065cbef919de6ee',
         chains: [fujiChain],
         ssr: true,
+        storage: createStorage({
+            storage: cookieStorage,
+        }),
     });
 }
 

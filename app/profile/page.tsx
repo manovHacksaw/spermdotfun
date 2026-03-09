@@ -1,8 +1,10 @@
 "use client";
 
+export const dynamic = 'force-dynamic'
+
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useEvmWallet } from "@/components/WalletProvider";
 import TopHeader from "@/components/TopHeader";
 import LeftRail from "@/components/LeftRail";
 import GlobalChat from "@/components/GlobalChat";
@@ -44,12 +46,11 @@ function normalizeTab(value: string | null): ProfileTab {
 function ProfilePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { connected, publicKey, signMessage } = useWallet();
+  const { connected, address: walletAddress } = useEvmWallet();
   const session = useSessionWalletContext();
   // Start at 0 to avoid hydration mismatch; update after mount
   const [leftRailWidth, setLeftRailWidth] = useState(0);
 
-  const walletAddress = publicKey?.toBase58() ?? null;
   const { balance: primarySprmBalance } = useSprmBalance(walletAddress);
   const {
     settings,
@@ -68,7 +69,7 @@ function ProfilePageContent() {
     saveSettings,
     settingsSaving,
     settingsError,
-  } = useProfileData(walletAddress, signMessage ?? undefined);
+  } = useProfileData(walletAddress);
 
   const tabParam = searchParams.get("tab");
   const activeTab = normalizeTab(tabParam);

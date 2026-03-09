@@ -31,7 +31,7 @@ export type ActiveWallet = 'primary' | 'instant'
 const ACTIVE_WALLET_KEY = 'sprmfun:active_wallet'
 
 export interface SessionWalletState {
-  sessionWallet: ethers.Wallet | null
+  sessionWallet: ethers.Wallet | ethers.HDNodeWallet | null
   sessionAddress: string | null
   isActive: boolean
   sessionSprmBalance: number | null
@@ -57,7 +57,7 @@ export interface SessionWalletState {
 export function useSessionWallet(): SessionWalletState {
   const { address: mainAddress, signer } = useEvmWallet()
 
-  const [sessionWallet, setSessionWallet] = useState<ethers.Wallet | null>(null)
+  const [sessionWallet, setSessionWallet] = useState<ethers.Wallet | ethers.HDNodeWallet | null>(null)
   const [depositStatus, setDepositStatus] = useState<TxStatus>('idle')
   const [depositError, setDepositError] = useState('')
   const [withdrawStatus, setWithdrawStatus] = useState<TxStatus>('idle')

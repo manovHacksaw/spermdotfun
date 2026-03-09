@@ -1,5 +1,7 @@
 'use client'
 
+export const dynamic = 'force-dynamic'
+
 import { useState, useEffect } from 'react'
 import { useEvmWallet } from '@/components/WalletProvider'
 import { spermTheme } from '@/components/theme/spermTheme'

@@ -1,6 +1,8 @@
 "use client";
 
-import dynamic from "next/dynamic";
+export const dynamic = 'force-dynamic'
+
+import nextDynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { TOP_HEADER_HEIGHT, CHAT_PANEL_WIDTH, BET_PANEL_WIDTH, MOBILE_BREAKPOINT } from "@/components/leftRailShared";
@@ -8,13 +10,13 @@ import { spermTheme } from "@/components/theme/spermTheme";
 import { useLiveGameStats } from "@/hooks/useLiveGameStats";
 import { useState, useEffect } from "react";
 
-const TopHeader = dynamic(() => import("@/components/TopHeader"), { ssr: false });
-const StockGrid = dynamic(() => import("@/components/StockGrid"), { ssr: false });
-const GameHUD = dynamic(() => import("@/components/GameHUD"), { ssr: false });
-const MultiplierBar = dynamic(() => import("@/components/MultiplierBar"), { ssr: false });
-const ChatSidebar = dynamic(() => import("@/components/ChatSidebar"), { ssr: false });
-const BetSidebar = dynamic(() => import("@/components/BetSidebar"), { ssr: false });
-const OnboardingGuide = dynamic(() => import("@/components/OnboardingGuide"), { ssr: false });
+const TopHeader = nextDynamic(() => import("@/components/TopHeader"), { ssr: false });
+const StockGrid = nextDynamic(() => import("@/components/StockGrid"), { ssr: false });
+const GameHUD = nextDynamic(() => import("@/components/GameHUD"), { ssr: false });
+const MultiplierBar = nextDynamic(() => import("@/components/MultiplierBar"), { ssr: false });
+const ChatSidebar = nextDynamic(() => import("@/components/ChatSidebar"), { ssr: false });
+const BetSidebar = nextDynamic(() => import("@/components/BetSidebar"), { ssr: false });
+const OnboardingGuide = nextDynamic(() => import("@/components/OnboardingGuide"), { ssr: false });
 
 const CARD_PANEL: React.CSSProperties = {
   flexShrink: 0,

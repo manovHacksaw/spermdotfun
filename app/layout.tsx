@@ -1,4 +1,6 @@
 import type { Metadata } from 'next'
+import { headers } from 'next/headers'
+import { cookieToInitialState } from 'wagmi'
 import './globals.css'
 import WalletContextProvider from '@/components/WalletProvider'
 import { SessionWalletProvider } from '@/context/SessionWalletContext'
@@ -10,11 +12,14 @@ export const metadata: Metadata = {
   description: 'Real-time crypto price betting game on Avalanche',
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const headersList = await headers()
+  const cookie = headersList.get('cookie')
+
   return (
     <html lang="en">
       <body>
-        <Providers>
+        <Providers initialState={undefined}>
           <WalletContextProvider>
             <SessionWalletProvider>
               {children}

@@ -97,6 +97,7 @@ export default function StockGrid() {
     ghostVisible: new Map<string, number>(),         // key → ghost color index (0–4)
     currentPrice: 0,
     lerpY: 0.0, // Client-side interpolated Y for smoothness
+    lerpAngle: 0.0,
     zoom: 1.0,
     marketPaused: false,
     isMobile: false,
@@ -436,12 +437,20 @@ export default function StockGrid() {
 
     // Smoothly interpolate the Y position on every frame
     const targetY = last2.y
-    s.lerpY += (targetY - s.lerpY) * 0.15 // Adjust the speed of the "chase"
+    s.lerpY += (targetY - s.lerpY) * 0.04 // Smoother chase — was 0.07
     const dotY = (s.lerpY * 30 + 250) * rowH - viewY
 
-    // Direction angle from previous LERP position
+    // Direction angle from previous LERP position — with additional smoothing
     const prev2 = s.history.length > 1 ? s.history[s.history.length - 2] : last2
-    const angle = Math.atan2((targetY - s.lerpY) * 30 * rowH, (last2.x - prev2.x) * zoom || 1)
+    const targetAngle = Math.atan2((targetY - s.lerpY) * 30 * rowH, (last2.x - prev2.x) * zoom || 1)
+
+    // Normalize angle jump for smoothing
+    if (Math.abs(targetAngle - s.lerpAngle) > Math.PI) {
+      if (targetAngle > s.lerpAngle) s.lerpAngle += Math.PI * 2
+      else s.lerpAngle -= Math.PI * 2
+    }
+    s.lerpAngle += (targetAngle - s.lerpAngle) * 0.07
+    const angle = s.lerpAngle
 
     ctx.save()
 
@@ -464,7 +473,7 @@ export default function StockGrid() {
     const t = Date.now() / 150
 
     // Turbulence: tail wiggles more when moving fast vertically
-    const turbulence = Math.min(0.8, Math.abs(targetY - s.lerpY) * 10)
+    const turbulence = Math.min(0.8, Math.abs(targetY - s.lerpY) * 4)
 
     const segs: { x0: number; y0: number; x1: number; y1: number; frac: number }[] = []
     for (let i = 0; i < TAIL_SEGS; i++) {

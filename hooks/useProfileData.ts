@@ -19,6 +19,8 @@ const EMPTY_SETTINGS: ProfileSettings = {
   clientSeed: '',
   referralCode: '',
   volume: 35,
+  referredBy: null,
+  referralEarned: 0,
 }
 
 const EMPTY_STATS: ProfileStats = {
