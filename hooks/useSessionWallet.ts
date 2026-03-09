@@ -55,7 +55,7 @@ export interface SessionWalletState {
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
 export function useSessionWallet(): SessionWalletState {
-  const { address: mainAddress, signer } = useEvmWallet()
+  const { address: mainAddress, signer, switchToFuji, wrongNetwork } = useEvmWallet()
 
   const [sessionWallet, setSessionWallet] = useState<ethers.Wallet | ethers.HDNodeWallet | null>(null)
   const [depositStatus, setDepositStatus] = useState<TxStatus>('idle')
@@ -175,8 +175,21 @@ export function useSessionWallet(): SessionWalletState {
   // Generates a session keypair, then prompts MetaMask to send 0.05 AVAX
   // from the user's main wallet to the session wallet for gas.
   const createSession = useCallback(async () => {
+    if (!mainAddress) {
+      setFundError('Connect your wallet first')
+      setFundStatus('error')
+      return
+    }
+    if (wrongNetwork) {
+      setFundError('Switching to Avalanche Fuji…')
+      setFundStatus('pending')
+      await switchToFuji()
+      setFundError('')
+      setFundStatus('idle')
+      return
+    }
     if (!signer) {
-      setFundError('Connect your MetaMask wallet first')
+      setFundError('Wallet not ready — please wait a moment and try again')
       setFundStatus('error')
       return
     }
@@ -239,7 +252,7 @@ export function useSessionWallet(): SessionWalletState {
   // and withdrawals. Users can obtain testnet AVAX from faucet.avax.network.
   const deposit = useCallback(async (sprmAmt: number) => {
     if (!sessionAddress || !signer) {
-      setDepositError('Connect your MetaMask wallet first')
+      setDepositError(wrongNetwork ? 'Switch to Avalanche Fuji first' : 'Wallet not ready — please wait a moment')
       setDepositStatus('error')
       return
     }

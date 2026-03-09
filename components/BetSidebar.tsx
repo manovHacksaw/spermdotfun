@@ -67,7 +67,7 @@ export default function BetSidebar({
   activePlayersCount,
   onClose,
 }: BetSidebarProps) {
-  const { address } = useEvmWallet();
+  const { address, wrongNetwork, switchToFuji } = useEvmWallet();
   const {
     sessionAddress,
     activeWallet,
@@ -660,23 +660,38 @@ export default function BetSidebar({
               <div style={{ fontSize: 11, color: spermTheme.textSecondary, lineHeight: 1.6 }}>
                 Lock SPRM for gasless instant bets. Sends 0.05 AVAX for gas.
               </div>
-              <button
-                onClick={() => createSession()}
-                disabled={fundStatus === 'pending'}
-                style={{
-                  padding: '12px 0',
-                  background: 'linear-gradient(135deg,#E84142,#FF5A5F)',
-                  border: 'none', borderRadius: 10,
-                  color: '#fff', fontSize: 13, fontWeight: 600,
-                  cursor: fundStatus === 'pending' ? 'wait' : 'pointer',
-                  fontFamily: 'inherit',
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={(e) => !fundStatus && (e.currentTarget.style.boxShadow = '0 8px 20px rgba(232,65,66,.35)')}
-                onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
-              >
-                {fundStatus === 'pending' ? 'Sending AVAX…' : fundStatus === 'done' ? '✓ Session Created' : '⚡ Start Session'}
-              </button>
+              {wrongNetwork ? (
+                <button
+                  onClick={() => switchToFuji()}
+                  style={{
+                    padding: '12px 0',
+                    background: 'linear-gradient(135deg,#f59e0b,#d97706)',
+                    border: 'none', borderRadius: 10,
+                    color: '#fff', fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  Switch to Avalanche Fuji
+                </button>
+              ) : (
+                <button
+                  onClick={() => createSession()}
+                  disabled={fundStatus === 'pending'}
+                  style={{
+                    padding: '12px 0',
+                    background: 'linear-gradient(135deg,#E84142,#FF5A5F)',
+                    border: 'none', borderRadius: 10,
+                    color: '#fff', fontSize: 13, fontWeight: 600,
+                    cursor: fundStatus === 'pending' ? 'wait' : 'pointer',
+                    fontFamily: 'inherit',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => !fundStatus && (e.currentTarget.style.boxShadow = '0 8px 20px rgba(232,65,66,.35)')}
+                  onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                >
+                  {fundStatus === 'pending' ? 'Sending AVAX…' : fundStatus === 'done' ? '✓ Session Created' : '⚡ Start Session'}
+                </button>
+              )}
               {fundError && <div style={{ fontSize: 11, color: spermTheme.error }}>{fundError}</div>}
             </div>
           ) : (
