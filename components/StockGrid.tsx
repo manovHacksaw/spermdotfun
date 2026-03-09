@@ -167,7 +167,8 @@ export default function StockGrid() {
     }
 
     const curColX = Math.floor(s.currentX / COLUMN_WIDTH_BASE) * COLUMN_WIDTH_BASE
-    const curRow = s.lastPtr ? yToRow(s.lastPtr.y) : -1
+    // Use lerpY (visual pointer position) so the row highlight matches the pointer dot exactly
+    const curRow = Math.floor(s.lerpY * 30) + 250
 
     // 1. Background
     ctx.fillStyle = C.bg
@@ -1118,18 +1119,38 @@ export default function StockGrid() {
         s.selections.delete(key)
         sendGhost('ghost_deselect', box.colX, box.row)
       } else if (!existing) {
-        // Tolerant lookup: column x may not be an exact multiple of COLUMN_WIDTH_BASE
-        const col = s.columns.find(c => Math.abs(c.x - box.colX) < COLUMN_WIDTH_BASE)
+        // Exact match first, then closest column within half column width
+        let col = s.columns.find(c => c.x === box.colX)
+        if (!col) {
+          let bestDist = COLUMN_WIDTH_BASE / 2
+          for (const c of s.columns) {
+            const d = Math.abs(c.x - box.colX)
+            if (d < bestDist) { bestDist = d; col = c }
+          }
+          if (col) console.log(`[CLICK] colX fuzzy match: wanted=${box.colX} got=${col.x}`)
+        }
         const bdata = col?.boxes[box.row]
+        // Diagnostics — remove once issue is resolved
+        if (!col) {
+          const xs = s.columns.map(c => c.x)
+          console.warn(`[CLICK] ❌ Column NOT FOUND colX=${box.colX} row=${box.row}. Available: min=${Math.min(...xs)} max=${Math.max(...xs)} count=${xs.length}`)
+        } else if (!bdata) {
+          console.warn(`[CLICK] ❌ Box NOT FOUND col.x=${col.x} row=${box.row} boxes.length=${col.boxes.length}`)
+        } else {
+          console.log(`[CLICK] ✓ col=${col.x} row=${box.row} mult=${bdata.multiplier}x mult_num=${bdata.mult_num} mult_den=${bdata.mult_den}`)
+        }
+        const multNum = bdata?.mult_num ?? 150
+        const multDen = bdata?.mult_den ?? 100
+        const multDisp = bdata?.multiplier ?? 1.5
         s.selections.set(key, { colX: box.colX, row: box.row, result: 'pending', resultTime: 0 })
         sendGhost('ghost_select', box.colX, box.row)
         if (selectSfx.current) { selectSfx.current.currentTime = 0; selectSfx.current.play().catch(() => { }) }
         window.dispatchEvent(new CustomEvent('sprmfun:select', {
           detail: {
             colX: box.colX, row: box.row,
-            multNum: bdata?.mult_num ?? 150,
-            multDen: bdata?.mult_den ?? 100,
-            multDisp: bdata?.multiplier ?? 1.5,
+            multNum,
+            multDen,
+            multDisp,
           },
         }))
       }

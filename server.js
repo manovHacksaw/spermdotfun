@@ -1280,9 +1280,9 @@ app.prepare().then(async () => {
     historyBuffer.push({ x: serverCurrentX, y: simYEma });
     if (historyBuffer.length > HISTORY_SIZE) historyBuffer.shift();
 
-    // tickRow must match box.row convention (row 0=bottom, row 499=top).
-    // Mapping: y=0 maps to row 250. Each 1.0 y units is 30 rows.
-    const tickRow = Math.max(0, Math.min(499, Math.floor(y * 30) + 250));
+    // tickRow uses simYEma (same value broadcast to clients) so visual position
+    // matches bet resolution — if the pointer visually passes a box, it wins.
+    const tickRow = Math.max(0, Math.min(499, Math.floor(simYEma * 30) + 250));
     const existing = columnRowRange.get(curColX);
     if (!existing) {
       columnRowRange.set(curColX, { minRow: tickRow, maxRow: tickRow });
