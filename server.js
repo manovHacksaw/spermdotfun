@@ -832,8 +832,8 @@ for (let i = 0; i < HISTORY_SIZE; i++) {
 console.log(
   `[BOOT] history seeded: ${historyBuffer.length} pts, serverCurrentX=${serverCurrentX}`,
 );
-// Ensure columns start 50 columns ahead of the pointer
-nextColX = serverCurrentX + COLUMN_WIDTH; // reset to just ahead of pointer
+// Align nextColX to a clean multiple of COLUMN_WIDTH so client column lookups match
+nextColX = (Math.floor(serverCurrentX / COLUMN_WIDTH) + 2) * COLUMN_WIDTH;
 allColumns.length = 0;
 allColumns.push(...makeColumns(50));
 console.log(

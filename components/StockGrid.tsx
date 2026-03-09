@@ -1066,15 +1066,19 @@ export default function StockGrid() {
       const ptrFrac = s.isMobile ? 0.45 : 0.30
       const rightMargin = Math.round(W * (1 - ptrFrac))
       const viewX = (s.currentX * zoom) - (W - rightMargin)
-      const absX = mouseX + viewX
-      const colX = Math.floor(absX / (COLUMN_WIDTH_BASE * zoom)) * COLUMN_WIDTH_BASE
-      const curColX = Math.floor(s.currentX / COLUMN_WIDTH_BASE) * COLUMN_WIDTH_BASE
+      const worldX = (mouseX + viewX) / zoom
 
-      if (colX <= curColX + 10 * COLUMN_WIDTH_BASE) return null
+      // Find the column that contains this world X position using actual column data
+      const col = s.columns.find(c => worldX >= c.x && worldX < c.x + COLUMN_WIDTH_BASE)
+      if (!col) return null
+
+      const curColX = Math.floor(s.currentX / COLUMN_WIDTH_BASE) * COLUMN_WIDTH_BASE
+      if (col.x <= curColX + 10 * COLUMN_WIDTH_BASE) return null
+
       const viewY = (s.lerpY * 30 + 250) * (ROW_HEIGHT_BASE * zoom) - (s.H / 2)
       const worldY = mouseY + viewY
-      const row = Math.floor(worldY / (ROW_HEIGHT_BASE * zoom))
-      return { colX, row }
+      const row = Math.max(0, Math.min(ROW_COUNT - 1, Math.floor(worldY / (ROW_HEIGHT_BASE * zoom))))
+      return { colX: col.x, row }
     }
 
     function onMouseMove(e: MouseEvent) {
@@ -1114,7 +1118,8 @@ export default function StockGrid() {
         s.selections.delete(key)
         sendGhost('ghost_deselect', box.colX, box.row)
       } else if (!existing) {
-        const col = s.columns.find(c => c.x === box.colX)
+        // Tolerant lookup: column x may not be an exact multiple of COLUMN_WIDTH_BASE
+        const col = s.columns.find(c => Math.abs(c.x - box.colX) < COLUMN_WIDTH_BASE)
         const bdata = col?.boxes[box.row]
         s.selections.set(key, { colX: box.colX, row: box.row, result: 'pending', resultTime: 0 })
         sendGhost('ghost_select', box.colX, box.row)
