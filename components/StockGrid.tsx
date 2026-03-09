@@ -235,41 +235,26 @@ export default function StockGrid() {
         ctx.arc(sx, boxTop, 2.2, 0, Math.PI * 2)
         ctx.fill()
 
-        // Visited / active highlight
+        // Visited / active highlight — only exact current row, no past-column fills
         let drewYellow = false
-        if (visited && r >= visited.minRow && r <= visited.maxRow) {
-          let alpha = 1
-          if (!isCurrent && visited.leaveTime !== null) {
-            const age = (now - visited.leaveTime) / 1000
-            alpha = Math.max(0, 1 - age / 6)
-          }
-          if (alpha > 0.01) {
-            const isExactRow = isCurrent && r === curRow
-            const fillAlpha = isExactRow ? 0.20 : isCurrent ? 0.14 : Math.min(0.12, alpha * 0.10)
-            const borderAlpha = isExactRow ? 0.75 : isCurrent ? 0.42 : Math.min(0.34, alpha * 0.30)
+        if (isCurrent && r === curRow) {
+          ctx.fillStyle = C.pastBox + '0.20)'
+          drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
+          ctx.fill()
 
-            ctx.fillStyle = C.pastBox + fillAlpha.toFixed(2) + ')'
-            drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
-            ctx.fill()
+          ctx.strokeStyle = 'rgba(245,245,242,0.82)'
+          ctx.lineWidth = 1.8
+          drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
+          ctx.stroke()
 
-            ctx.strokeStyle = isExactRow
-              ? 'rgba(245,245,242,0.82)'
-              : isCurrent
-                ? `rgba(232,65,66,${borderAlpha.toFixed(2)})`
-                : `rgba(245,245,242,${borderAlpha.toFixed(2)})`
-            ctx.lineWidth = isExactRow ? 1.8 : 1.2
-            drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
-            ctx.stroke()
-
-            ctx.fillStyle = isExactRow ? C.multActive : C.multMid
-            ctx.font = isExactRow ? `800 ${13 * zoom}px 'Outfit', sans-serif` : `600 ${12 * zoom}px 'Outfit', sans-serif`
-            ctx.textAlign = 'center'
-            ctx.textBaseline = 'middle'
-            ctx.fillText(`${mult}×`, sx + colW / 2, boxTop + rowH / 2)
-            ctx.textBaseline = 'alphabetic'
-            drewYellow = true
-            if (!sel) continue
-          }
+          ctx.fillStyle = C.multActive
+          ctx.font = `800 ${13 * zoom}px 'Outfit', sans-serif`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(`${mult}×`, sx + colW / 2, boxTop + rowH / 2)
+          ctx.textBaseline = 'alphabetic'
+          drewYellow = true
+          if (!sel) continue
         }
 
         // Selection result flash (win / lose)
