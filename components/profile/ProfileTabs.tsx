@@ -10,12 +10,13 @@ interface ProfileTabsProps {
 
 const tabs: { id: ProfileTab; label: string }[] = [
   { id: 'stats', label: 'Statistics' },
+  { id: 'referrals', label: 'Referrals' },
   { id: 'transfer', label: 'Transfer Funds' },
   { id: 'transactions', label: 'Transactions' },
   { id: 'settings', label: 'Settings' },
 ]
 
-const disabledItems = ['Affiliates', 'Cashback', 'Fairness', 'TOS', 'FAQ']
+const disabledItems = ['Cashback', 'Fairness', 'TOS', 'FAQ']
 
 export default function ProfileTabs({ activeTab, onChange }: ProfileTabsProps) {
   return (

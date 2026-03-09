@@ -6,6 +6,7 @@ import { useEvmWallet } from '@/components/WalletProvider'
 import { useSessionWalletContext } from '@/context/SessionWalletContext'
 import { useSprmBalance } from '@/hooks/useSprmBalance'
 import { spermTheme } from '@/components/theme/spermTheme'
+import { friendlyError } from '@/lib/friendlyError'
 
 // ── Contract constants ────────────────────────────────────────────────────────
 const TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_ADDRESS ?? ''
@@ -38,8 +39,17 @@ export default function GameHUD() {
   const session = useSessionWalletContext()
 
   // Bet modal state (switched to queue to support spray betting)
-  const [pendingBetsQueue, setPendingBetsQueue] = useState<{ id: string; colX: number; row: number; multNum: number; multDen: number; multDisp: number }[]>([])
-  const pendingBet = pendingBetsQueue[0] || null // Modal uses the first item if manual confirmation is needed
+  const [pendingBetsQueue, setPendingBetsQueue] = useState<{
+    id: string;
+    colX: number;
+    row: number;
+    multNum: number;
+    multDen: number;
+    multDisp: number;
+    status: 'pending' | 'submitting' | 'done' | 'error';
+    txHash?: string;
+  }[]>([])
+  const pendingBet = pendingBetsQueue.find(b => b.status === 'pending') || null // Modal uses the first idle item
   const [betAmount, setBetAmount] = useState('1')
   const [betStatus, setBetStatus] = useState<'idle' | 'submitting' | 'done' | 'error'>('idle')
   const [betError, setBetError] = useState('')
@@ -52,8 +62,13 @@ export default function GameHUD() {
   const [resolution, setResolution] = useState<{ won: boolean; payout: number; txHash?: string; box_row: number } | null>(null)
   const resTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // P/L float animation items
+  const [floatItems, setFloatItems] = useState<{ id: number; won: boolean; amount: number; x: number }[]>([])
+  const floatIdRef = useRef(0)
+
   // Welcome Guide
   const [showGuide, setShowGuide] = useState(false)
+  const [guideStep, setGuideStep] = useState(0)
   useEffect(() => {
     const hasSeenGuide = localStorage.getItem('sprmfun_guide_seen')
     if (!hasSeenGuide) setShowGuide(true)
@@ -101,13 +116,15 @@ export default function GameHUD() {
 
       if (quickBet || useSession) {
         // Spray fire immediately — do not clear queue, just append
+        const newBet = { ...betData, status: 'pending' as const }
         setBetAmount(presetAmount)
-        setPendingBetsQueue(prev => [...prev.filter(b => b.id !== betData.id), betData])
+        setPendingBetsQueue(prev => [...prev.filter(b => b.id !== betData.id), newBet])
         setBetStatus('idle')
         setBetError('')
       } else {
         // Native modal — replace queue with just this one to avoid stacking modals
-        setPendingBetsQueue([betData])
+        const newBet = { ...betData, status: 'pending' as const }
+        setPendingBetsQueue([newBet])
         setBetAmount(presetAmount)
         setBetStatus('idle')
         setBetError('')
@@ -140,9 +157,19 @@ export default function GameHUD() {
       const { won, payout, txHash, box_row, user: betUser } = e.detail
       // Only show for the active user
       if (betUser === address || betUser === session.sessionAddress) {
+        // Clean up from pending queue
+        const betId = `${e.detail.box_x}_${e.detail.box_row}`
+        setPendingBetsQueue(prev => prev.filter(b => b.id !== betId))
+
         if (resTimer.current) clearTimeout(resTimer.current)
         setResolution({ won, payout, txHash, box_row })
         resTimer.current = setTimeout(() => setResolution(null), 6000)
+
+        // Spawn a P/L float item
+        const id = ++floatIdRef.current
+        const x = 35 + Math.random() * 30 // random % of width to spread overlapping bets
+        setFloatItems(prev => [...prev, { id, won, amount: payout, x }])
+        setTimeout(() => setFloatItems(prev => prev.filter(f => f.id !== id)), 2200)
       }
     }
     const onReceipt = (e: CustomEvent) => {
@@ -209,8 +236,8 @@ export default function GameHUD() {
         ; (window as any)._sprmBettingInFlight = true
     }
 
-    // Immediately pop it from the visual queue to let the modal vanish while mining
-    setPendingBetsQueue(prev => prev.filter(b => b.id !== pendingBet.id))
+    // Set status to submitting
+    setPendingBetsQueue(prev => prev.map(b => b.id === pendingBet.id ? { ...b, status: 'submitting' } : b))
 
     // Balance check before sending
     const availableBalance = useSession ? (session.sessionSprmBalance ?? 0) : (balance ?? 0)
@@ -310,6 +337,8 @@ export default function GameHUD() {
 
         console.log('[BET] betId:', betId?.toString())
 
+        const refCode = typeof window !== 'undefined' ? localStorage.getItem('sprmfun_ref') : null
+
         // 4. Register the bet with the server for auto-resolution
         fetch('/register-bet', {
           method: 'POST',
@@ -321,6 +350,7 @@ export default function GameHUD() {
             box_row,
             mult_num: multNum16,
             bet_amount: amountTokens,
+            referralCode: refCode,
           }),
         }).then(() => console.log('[BET] register-bet sent to server'))
           .catch(e => console.warn('[BET] register-bet failed:', e.message))
@@ -335,16 +365,14 @@ export default function GameHUD() {
         }
       } catch (err: any) {
         console.error('[BET]', err)
+        const errMsg = friendlyError(err)
         if (useSession) {
-          const isNoGas = err?.code === 'INSUFFICIENT_FUNDS' || err?.message?.includes('insufficient funds')
-          const msg = isNoGas
-            ? 'Session needs AVAX gas — top up in sidebar'
-            : 'Bet failed: ' + (err?.message?.slice(0, 50) ?? 'error')
-          showSessionToast(msg, false)
+          showSessionToast(errMsg, false)
+          setPendingBetsQueue(prev => prev.filter(b => b.id !== pendingBet.id))
         } else {
-          setBetError(err?.message?.slice(0, 120) ?? 'Transaction failed')
+          setBetError(errMsg)
           setBetStatus('error')
-          setPendingBetsQueue(prev => [...prev.filter(b => b.id !== pendingBet.id), pendingBet]) // restore for native modal
+          setPendingBetsQueue(prev => prev.map(b => b.id === pendingBet.id ? { ...b, status: 'error' } : b))
         }
       } finally {
         if (!useSession && !quickBet) {
@@ -401,7 +429,7 @@ export default function GameHUD() {
     borderRadius: 8, padding: '28px 32px',
     minWidth: 320, color: spermTheme.textPrimary,
     display: 'flex', flexDirection: 'column', gap: 18,
-    boxShadow: `0 0 40px rgba(212,170,255,0.08)`,
+    boxShadow: `0 0 40px rgba(232,65,66,0.10)`,
   }
 
   return (
@@ -410,49 +438,113 @@ export default function GameHUD() {
       {showGuide && (
         <div style={{
           position: 'absolute', inset: 0,
-          background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
+          background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(12px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 100, pointerEvents: 'all',
+          zIndex: 1000, pointerEvents: 'all',
         }}>
           <div style={{
             background: spermTheme.bgElevated,
             border: `1px solid ${spermTheme.accentBorder}`,
-            borderRadius: 12, padding: 32, maxWidth: 440,
-            display: 'flex', flexDirection: 'column', gap: 24,
+            borderRadius: 16, padding: 0, maxWidth: 480, width: '90%',
+            overflow: 'hidden',
+            display: 'flex', flexDirection: 'column',
             color: spermTheme.textPrimary,
-            boxShadow: `0 0 60px rgba(0,0,0,0.5), 0 0 30px ${spermTheme.accentGlow}`,
-            animation: 'sprmIn 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
-            backdropFilter: 'blur(20px)',
+            boxShadow: `0 0 80px rgba(0,0,0,0.7), 0 0 40px ${spermTheme.accentGlow}`,
+            animation: 'sprmIn 0.6s cubic-bezier(0.16, 1, 0.3, 1)',
           }}>
-            <div style={{ fontSize: 24, fontWeight: 900, color: spermTheme.accent, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace" }}>SYSTEM_INITIALIZE</div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: 14, color: spermTheme.textSecondary, lineHeight: 1.6 }}>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{ color: spermTheme.accent, fontWeight: 700 }}>01.</div>
-                <div>Pick a box in the future. The closer to the current time, the higher the risk!</div>
+            {/* Header / Progress */}
+            <div style={{
+              background: 'rgba(232,65,66,0.08)',
+              padding: '24px 32px 18px',
+              borderBottom: `1px solid ${spermTheme.borderChrome}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+            }}>
+              <div style={{ fontSize: 20, fontWeight: 900, color: spermTheme.accent, letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace" }}>
+                CORE_ONBOARDING
               </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{ color: spermTheme.accent, fontWeight: 700 }}>02.</div>
-                <div>The <b>Sperm</b> moves based on live AVAX/USDT price momentum. Velocity = Price Change.</div>
-              </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{ color: spermTheme.accent, fontWeight: 700 }}>03.</div>
-                <div>Use <b>Instant Wallet</b> for gasless, rapid-fire betting with zero confirmation popups.</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[0, 1, 2].map(s => (
+                  <div key={s} style={{
+                    width: guideStep === s ? 18 : 6,
+                    height: 6,
+                    borderRadius: 3,
+                    background: guideStep === s ? spermTheme.accent : spermTheme.textTertiary,
+                    transition: 'all 0.3s ease'
+                  }} />
+                ))}
               </div>
             </div>
 
-            <button
-              onClick={closeGuide}
-              style={{
-                marginTop: 10, padding: '12px 0',
-                background: spermTheme.accentSoft, border: `1.5px solid ${spermTheme.accentBorder}`,
-                borderRadius: 10, color: spermTheme.accent, fontWeight: 800,
-                cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >
-              GOT IT, LET'S GO!
-            </button>
+            {/* Steps Content */}
+            <div style={{ padding: '32px', minHeight: 180 }}>
+              {guideStep === 0 && (
+                <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 12 }}>THE PRICE GRID</div>
+                  <p style={{ fontSize: 14, color: spermTheme.textSecondary, lineHeight: 1.6 }}>
+                    Every box on the screen represents a <b>Future Price Range</b>.
+                    The grid moves left as time passes. Pick a box where you think the "Sperm" will land!
+                  </p>
+                </div>
+              )}
+              {guideStep === 1 && (
+                <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 12 }}>INSTANT BETTING</div>
+                  <p style={{ fontSize: 14, color: spermTheme.textSecondary, lineHeight: 1.6 }}>
+                    Click ⚡ <b>Start Session</b> to lock some SPRM and get gasless, 1-click execution.
+                    No transaction popups. Perfect for rapid-fire adjustments.
+                  </p>
+                </div>
+              )}
+              {guideStep === 2 && (
+                <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 12 }}>SOCIAL & REWARDS</div>
+                  <p style={{ fontSize: 14, color: spermTheme.textSecondary, lineHeight: 1.6 }}>
+                    Top players on the leaderboard receive bonus SPRM every hour.
+                    Watch the <b>Live Feed</b> to see what the pros are doing and refine your strategy.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div style={{ padding: '24px 32px 32px', display: 'flex', gap: 12 }}>
+              {guideStep > 0 && (
+                <button
+                  onClick={() => setGuideStep(s => s - 1)}
+                  style={{
+                    flex: 1, padding: '12px 0',
+                    background: 'rgba(255,255,255,0.05)', border: `1px solid ${spermTheme.borderChrome}`,
+                    borderRadius: 10, color: spermTheme.textSecondary, fontWeight: 700,
+                    cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s'
+                  }}
+                >
+                  PREVIOUS
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  if (guideStep < 2) setGuideStep(s => s + 1)
+                  else closeGuide()
+                }}
+                style={{
+                  flex: 2, padding: '12px 0',
+                  background: 'linear-gradient(135deg, #E84142, #FF5A5F)', border: 'none',
+                  borderRadius: 10, color: '#fff', fontWeight: 800,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  boxShadow: '0 8px 24px rgba(232,65,66,0.3)',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {guideStep < 2 ? 'NEXT STEP' : 'ENTER SYSTEM'}
+              </button>
+            </div>
           </div>
+          <style>{`
+            @keyframes fadeIn {
+              from { opacity: 0; transform: translateY(10px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+          `}</style>
         </div>
       )}
 
@@ -643,6 +735,88 @@ export default function GameHUD() {
         </div>
       )}
 
+      {/* ── P/L Float Animations ── */}
+      {floatItems.map(item => (
+        <div
+          key={item.id}
+          style={{
+            position: 'absolute',
+            left: `${item.x}%`,
+            bottom: '38%',
+            transform: 'translateX(-50%)',
+            pointerEvents: 'none',
+            zIndex: 55,
+            animation: 'plFloat 2.1s cubic-bezier(0.16,1,0.3,1) forwards',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 18,
+            fontWeight: 800,
+            letterSpacing: 0.5,
+            color: item.won ? '#34D399' : '#FF5A5F',
+            textShadow: item.won
+              ? '0 0 12px rgba(52,211,153,0.80), 0 0 24px rgba(52,211,153,0.40)'
+              : '0 0 12px rgba(255,90,95,0.80), 0 0 24px rgba(232,65,66,0.40)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {item.won ? `+${item.amount.toFixed(2)} SPRM` : `-${item.amount.toFixed(2)} SPRM`}
+        </div>
+      ))}
+      <style>{`
+        @keyframes plFloat {
+          0%   { opacity: 0;    transform: translateX(-50%) translateY(0px)   scale(0.7); }
+          12%  { opacity: 1;    transform: translateX(-50%) translateY(-8px)  scale(1.05); }
+          40%  { opacity: 1;    transform: translateX(-50%) translateY(-28px) scale(1); }
+          100% { opacity: 0;    transform: translateX(-50%) translateY(-80px) scale(0.85); }
+        }
+      `}</style>
+
+      {/* ── Bet Queue HUD (bottom-left) ── */}
+      {pendingBetsQueue.some(b => b.status !== 'pending') && (
+        <div style={{
+          position: 'absolute', bottom: 20, left: 20,
+          display: 'flex', flexDirection: 'column', gap: 6,
+          zIndex: 45, pointerEvents: 'all',
+        }}>
+          {pendingBetsQueue.filter(b => b.status !== 'pending').map(b => (
+            <div key={b.id} style={{
+              background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)',
+              border: `1px solid ${b.status === 'error' ? spermTheme.error : spermTheme.accentBorder}`,
+              borderRadius: 6, padding: '6px 12px',
+              display: 'flex', alignItems: 'center', gap: 10,
+              animation: 'slideInLeft 0.3s ease-out',
+            }}>
+              <div style={{
+                width: 6, height: 6, borderRadius: '50%',
+                background: b.status === 'submitting' ? spermTheme.accent : b.status === 'error' ? spermTheme.error : spermTheme.success,
+                animation: b.status === 'submitting' ? 'pulse-soft 1s infinite' : 'none',
+              }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: spermTheme.textPrimary, fontFamily: "'JetBrains Mono', monospace" }}>
+                {b.multDisp.toFixed(2)}x
+              </span>
+              <span style={{ fontSize: 10, color: spermTheme.textTertiary }}>
+                {b.status === 'submitting' ? 'Confirming…' : b.status === 'error' ? 'Failed' : 'Ready'}
+              </span>
+              {b.status === 'error' && (
+                <button
+                  onClick={() => setPendingBetsQueue(prev => prev.filter(q => q.id !== b.id))}
+                  style={{ background: 'transparent', border: 'none', color: spermTheme.textTertiary, cursor: 'pointer', fontSize: 10 }}
+                >✕</button>
+              )}
+            </div>
+          ))}
+          <style>{`
+            @keyframes slideInLeft {
+              from { opacity: 0; transform: translateX(-20px); }
+              to { opacity: 1; transform: translateX(0); }
+            }
+            @keyframes pulse-soft {
+              0% { opacity: 0.4; transform: scale(0.8); }
+              50% { opacity: 1; transform: scale(1.1); }
+              100% { opacity: 0.4; transform: scale(0.8); }
+            }
+          `}</style>
+        </div>
+      )}
     </div>
   )
 }

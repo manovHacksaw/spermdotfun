@@ -10,6 +10,7 @@ import {
 } from '@/lib/sessionWallet'
 import { useSprmBalance } from '@/hooks/useSprmBalance'
 import { useEvmWallet } from '@/components/WalletProvider'
+import { friendlyError } from '@/lib/friendlyError'
 
 // ── Contract constants ─────────────────────────────────────────────────────────
 const TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_ADDRESS ?? ''
@@ -197,7 +198,7 @@ export function useSessionWallet(): SessionWalletState {
       setTimeout(() => setFundStatus('idle'), 4000)
     } catch (err: any) {
       console.error('[SESSION] fund error:', err)
-      setFundError(err?.message?.slice(0, 120) ?? 'Fund failed')
+      setFundError(friendlyError(err))
       setFundStatus('error')
     }
   }, [signer, refreshAvaxBalance])
@@ -228,7 +229,7 @@ export function useSessionWallet(): SessionWalletState {
       setTimeout(() => setFundStatus('idle'), 4000)
     } catch (err: any) {
       console.error('[SESSION] topUpGas error:', err)
-      setFundError(err?.message?.slice(0, 120) ?? 'Top up failed')
+      setFundError(friendlyError(err))
       setFundStatus('error')
     }
   }, [signer, sessionAddress, refreshAvaxBalance])
@@ -275,7 +276,7 @@ export function useSessionWallet(): SessionWalletState {
       setTimeout(() => setDepositStatus('idle'), 3000)
     } catch (err: any) {
       console.error('[SESSION] deposit error:', err)
-      setDepositError(err?.message?.slice(0, 120) ?? 'Deposit failed')
+      setDepositError(friendlyError(err))
       setDepositStatus('error')
     }
   }, [sessionAddress, signer, refreshSessionBalance])
@@ -315,7 +316,7 @@ export function useSessionWallet(): SessionWalletState {
       setTimeout(() => setWithdrawStatus('idle'), 3000)
     } catch (err: any) {
       console.error('[SESSION] withdrawAll error:', err)
-      setWithdrawError(err?.message?.slice(0, 120) ?? 'Withdraw failed')
+      setWithdrawError(friendlyError(err))
       setWithdrawStatus('error')
     }
   }, [sessionWallet, mainAddress, refreshSessionBalance])

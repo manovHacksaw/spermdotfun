@@ -13,6 +13,7 @@ import StatsTab from "@/components/profile/StatsTab";
 import TransferTab from "@/components/profile/TransferTab";
 import TransactionsTab from "@/components/profile/TransactionsTab";
 import SettingsTab from "@/components/profile/SettingsTab";
+import ReferralsTab from "@/components/profile/ReferralsTab";
 import {
   DUAL_PANEL_WIDTH,
   LEFT_RAIL_BREAKPOINT,
@@ -28,6 +29,7 @@ import { type ProfileTab } from "@/lib/profile/types";
 
 const allowedTabs: ProfileTab[] = [
   "stats",
+  "referrals",
   "transfer",
   "transactions",
   "settings",
@@ -48,7 +50,7 @@ function ProfilePageContent() {
   const [leftRailWidth, setLeftRailWidth] = useState(0);
 
   const walletAddress = publicKey?.toBase58() ?? null;
-  const { balance: primarySprmBalance } = useSprmBalance(publicKey);
+  const { balance: primarySprmBalance } = useSprmBalance(walletAddress);
   const {
     settings,
     stats,
@@ -125,6 +127,9 @@ function ProfilePageContent() {
           errorMessage={settingsError}
         />
       );
+    }
+    if (activeTab === "referrals") {
+      return <ReferralsTab settings={settings} loading={statsLoading} />;
     }
 
     return (
@@ -282,7 +287,7 @@ function ProfilePageContent() {
                 nickname={settings.nickname}
                 primarySprmBalance={primarySprmBalance}
                 sessionSprmBalance={session.sessionSprmBalance}
-                sessionSolBalance={session.sessionSolBalance}
+                sessionSolBalance={session.sessionAvaxBalance}
               />
 
               <ProfileTabs

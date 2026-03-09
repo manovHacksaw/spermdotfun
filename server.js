@@ -20,7 +20,7 @@ const handle = app.getRequestHandler();
 
 // ── Layout constants ────────────────────────────────────────────────────────────
 const COLUMN_WIDTH = 50;
-const PX_PER_EVENT = 1;
+const PX_PER_EVENT = 0.95; // Reduced by 5% (was 1)
 
 // ── Dynamic multiplier generator (1.01x–2.00x per box) ─────────────────────────
 // Weighted multiplier: exponential falloff so high values are rare.
@@ -60,7 +60,13 @@ const GAME_ABI = [
 let evmProvider = null;
 let serverWallet = null;
 let gameContract = null;
+let tokenContract = null;
 let onchainReady = false;
+
+const TOKEN_ABI = [
+  "function balanceOf(address account) external view returns (uint256)",
+  "function decimals() external view returns (uint8)"
+];
 
 function initEvm() {
   const privateKey = process.env.SERVER_PRIVATE_KEY;
@@ -79,13 +85,19 @@ function initEvm() {
   evmProvider = new ethers.JsonRpcProvider(RPC_URL);
   serverWallet = new ethers.Wallet(privateKey, evmProvider);
   gameContract = new ethers.Contract(GAME_ADDRESS, GAME_ABI, serverWallet);
+
+  const tokenAddr = process.env.NEXT_PUBLIC_TOKEN_ADDRESS || "";
+  if (tokenAddr) {
+    tokenContract = new ethers.Contract(tokenAddr, TOKEN_ABI, evmProvider);
+  }
+
   // Separate WebSocket provider for event subscriptions — avoids eth_filter expiry on Fuji HTTP RPC
   const wsProvider = new ethers.WebSocketProvider(WS_RPC_URL);
   gameContract._wsContract = new ethers.Contract(GAME_ADDRESS, GAME_ABI, wsProvider);
 
 
   onchainReady = true;
-  console.log(`[EVM] Connected — wallet=${serverWallet.address} contract=${GAME_ADDRESS}`);
+  console.log(`[EVM] Connected — wallet=${serverWallet.address} contract=${GAME_ADDRESS} token=${tokenAddr}`);
 }
 
 const profileService = createProfileService({
@@ -106,6 +118,96 @@ const profileService = createProfileService({
 
 let profileBackfillInFlight = false;
 
+// ── Rate limiting ────────────────────────────────────────────────────────────────
+// Sliding-window per-IP counter; no external dependency needed.
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 60; // registrations per minute per IP
+const rateLimitMap = new Map(); // ip → [timestamp, ...]
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const window = RATE_LIMIT_WINDOW_MS;
+  const arr = (rateLimitMap.get(ip) || []).filter(t => now - t < window);
+  if (arr.length >= RATE_LIMIT_MAX) return false;
+  arr.push(now);
+  rateLimitMap.set(ip, arr);
+  return true;
+}
+
+// Prune stale rate-limit entries every 5 minutes
+setInterval(() => {
+  const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
+  for (const [ip, arr] of rateLimitMap) {
+    const pruned = arr.filter(t => t > cutoff);
+    if (pruned.length === 0) rateLimitMap.delete(ip);
+    else rateLimitMap.set(ip, pruned);
+  }
+}, 300_000);
+
+// ── Bet validation ───────────────────────────────────────────────────────────────
+const EVM_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+const MAX_BET_AMOUNT = parseFloat(process.env.MAX_BET_AMOUNT || '10000');
+
+function validateBetPayload(msg) {
+  if (!msg || typeof msg !== 'object') return 'Invalid payload';
+  if (!EVM_ADDR_RE.test(String(msg.user || ''))) return 'Invalid user address';
+  const row = Number(msg.box_row);
+  if (!Number.isFinite(row) || row < 0 || row > 499) return 'box_row out of range [0,499]';
+  const bx = Number(msg.box_x);
+  if (!Number.isFinite(bx) || bx < 0) return 'box_x must be a non-negative number';
+  const mn = Number(msg.mult_num);
+  if (!Number.isFinite(mn) || mn < 101 || mn > 2000) return 'mult_num out of range [101,2000]';
+  const ba = Number(msg.bet_amount);
+  if (!Number.isFinite(ba) || ba <= 0) return 'bet_amount must be positive';
+  if (ba > MAX_BET_AMOUNT) return `bet_amount exceeds maximum (${MAX_BET_AMOUNT} SPRM)`;
+  return null; // ok
+}
+
+// ── Market pause state ───────────────────────────────────────────────────────────
+const PRICE_STALE_MS = 5000;       // ms since last price tick before pausing bets
+let lastPriceTick = 0;             // timestamp of last Binance price message
+let bettingPaused = false;
+
+function checkAndUpdateMarketPause() {
+  if (lastPriceTick === 0) return; // haven't received first tick yet
+  const stale = Date.now() - lastPriceTick > PRICE_STALE_MS;
+  if (stale !== bettingPaused) {
+    bettingPaused = stale;
+    broadcast(JSON.stringify({ type: 'market_paused', paused: bettingPaused }));
+    console.log(`[MARKET] ${bettingPaused ? 'PAUSED (feed stale)' : 'RESUMED'}`);
+  }
+}
+
+// ── House Bank Balance ──────────────────────────────────────────────────────────
+let houseBankBalance = 0;
+
+async function updateHouseBank() {
+  if (!onchainReady || !tokenContract || !GAME_ADDRESS) return;
+  try {
+    const bal = await tokenContract.balanceOf(GAME_ADDRESS);
+    const formatted = parseFloat(ethers.formatUnits(bal, 18));
+    if (formatted !== houseBankBalance) {
+      houseBankBalance = formatted;
+      broadcast(JSON.stringify({ type: 'house_bank', balance: houseBankBalance }));
+      console.log(`[BANK] House bank updated: ${houseBankBalance.toFixed(2)} SPRM`);
+    }
+  } catch (err) {
+    console.error(`[BANK] Failed to fetch house bank: ${err.message}`);
+  }
+}
+
+// Update house bank every 30 seconds
+setInterval(updateHouseBank, 30000);
+
+// ── Leaderboard throttle ─────────────────────────────────────────────────────────
+let leaderboardDirty = false;
+setInterval(() => {
+  if (leaderboardDirty && clients.size > 0) {
+    broadcast(JSON.stringify(leaderboardPayload()));
+    leaderboardDirty = false;
+  }
+}, 2000);
+
 // ── VRF state ───────────────────────────────────────────────────────────────────
 // Request new randomness every VRF_REFRESH_COLS columns. Oracle has latency so
 // we request further ahead (15 cols) and trigger early (when 12 cols consumed).
@@ -119,9 +221,10 @@ let pendingVrfStartColX = 0; // colX for which the pending request was made
 let vrfFailCount = 0; // consecutive oracle failures → trigger local fallback
 
 // Winning row: weighted selection biased toward lastWinRow so jumps stay small.
-// Weight table for delta = -4..+4 (9 entries). Most likely delta is 0 (stay),
-// large jumps (±4) are rare. This keeps the pointer path smooth across columns.
-const ROW_DELTA_WEIGHTS = [2, 4, 10, 20, 30, 20, 10, 4, 2]; // deltas -4..+4, sum=102
+// Weight table for delta = -4..+4 (9 entries). delta=0 is removed (weight=0) so
+// the pointer ALWAYS moves diagonally — never stays at the same row across columns.
+// Large jumps (±4) are rare. This forces a diagonal path for every column crossing.
+const ROW_DELTA_WEIGHTS = [2, 4, 10, 20, 0, 20, 10, 4, 2]; // deltas -4..+4, no delta=0
 const ROW_DELTA_CDF = (() => {
   const total = ROW_DELTA_WEIGHTS.reduce((a, b) => a + b, 0);
   const cdf = [];
@@ -158,7 +261,11 @@ function deriveWinningRow(vrfResult, boxX) {
   const biasMag = Math.round(Math.abs(distFromCenter) * 0.7);
   const bias = -Math.sign(distFromCenter) * biasMag; // push toward center
   delta = Math.max(-4, Math.min(4, delta + bias));
-  const row = Math.max(0, Math.min(499, lastWinRow + delta));
+  let row = Math.max(0, Math.min(499, lastWinRow + delta));
+  // Diagonal enforcement: if boundary clamping caused row to equal lastWinRow, nudge by 1
+  if (row === lastWinRow) {
+    row = (hash[1] & 1) ? Math.min(499, row + 1) : Math.max(0, row - 1);
+  }
   lastWinRow = row;
   return row;
 }
@@ -170,9 +277,9 @@ const vrfPath = new Map();
 let currentAvaxPrice = 0;
 let lastPrice = 0;
 let priceBaseline = 0;
-const PRICE_CHAOS_FACTOR = 150.0; // Reduced amplification for smoother movements
+const PRICE_CHAOS_FACTOR = 142.5; // Reduced by 5% (was 150.0)
 const FRICTION = 0.94;           // Drag to prevent infinite sliding
-const MOMENTUM_INERTIA = 0.12;   // How much price affects velocity
+const MOMENTUM_INERTIA = 0.114;  // Reduced by 5% (was 0.12)
 
 function initBinance() {
   const ws = new WebSocket("wss://stream.binance.com:9443/ws/avaxusdt@ticker");
@@ -187,6 +294,7 @@ function initBinance() {
       const price = parseFloat(data.c); // current price
       if (price) {
         currentAvaxPrice = price;
+        lastPriceTick = Date.now();
         // console.log(`[BINANCE] AVAX Price: ${price}`);
         if (priceBaseline === 0) priceBaseline = price;
       }
@@ -214,6 +322,14 @@ let simTime = 0;
 let steerTargetY = 0.5;
 let steerActive = false;
 
+// ── Price flatness detection ────────────────────────────────────────────────────
+// When price is unchanged for PRICE_FLAT_MS, inject escalating chaos so the
+// pointer remains unpredictable and players can't trivially read the path.
+const PRICE_FLAT_MS = 1500;       // ms of no price change before chaos kicks in
+const CHAOS_SHOCK_INTERVAL = 18;  // inject a velocity shock every N ticks (~600ms at 30fps)
+let lastPriceChangedAt = 0;       // timestamp of last real price tick
+let lastTrackedPrice = 0;         // price value at lastPriceChangedAt
+
 function stepSim() {
   simTime++;
 
@@ -225,12 +341,37 @@ function stepSim() {
     const priceDelta = currentAvaxPrice - lastPrice;
     lastPrice = currentAvaxPrice;
 
+    // Track when price actually changed (not just ticked with the same value)
+    const now = Date.now();
+    if (currentAvaxPrice !== lastTrackedPrice) {
+      lastTrackedPrice = currentAvaxPrice;
+      lastPriceChangedAt = now;
+    }
+    const flatMs = lastPriceChangedAt > 0 ? now - lastPriceChangedAt : 0;
+    const isFlat = flatMs >= PRICE_FLAT_MS;
+
     // Apply "Force" to velocity: Price Delta * Chaos * Inertia
     simVelocity = (simVelocity * FRICTION) + (priceDelta * PRICE_CHAOS_FACTOR * MOMENTUM_INERTIA);
 
-    // Add organic jitter based on the hash of the price (unpredictable micro-noise)
-    const jitterSeed = Math.sin(currentAvaxPrice * 1000000);
-    simVelocity += jitterSeed * 0.0005;
+    if (isFlat) {
+      // Price has been constant — inject escalating unpredictable turbulence.
+      // Strength grows with how long the price has been flat, capped at 3x.
+      const flatSecs = flatMs / 1000;
+      const chaosStrength = Math.min(3.0, 1.0 + flatSecs * 0.4);
+
+      // Continuous random micro-noise (replaces the deterministic sin-jitter)
+      simVelocity += (Math.random() - 0.5) * 0.003 * chaosStrength;
+
+      // Periodic velocity shocks — sudden direction reversals every ~18 ticks
+      if (simTime % CHAOS_SHOCK_INTERVAL === 0) {
+        const shockDir = Math.random() < 0.5 ? 1 : -1;
+        simVelocity += shockDir * (0.015 + Math.random() * 0.025) * chaosStrength;
+        console.log(`[SIM] flat=${flatMs}ms shock dir=${shockDir > 0 ? '↑' : '↓'} strength=${chaosStrength.toFixed(2)}`);
+      }
+    } else {
+      // Normal operation: small deterministic jitter replaced with true random noise
+      simVelocity += (Math.random() - 0.5) * 0.001;
+    }
 
     // Update position
     simY += simVelocity;
@@ -430,9 +571,9 @@ function activePlayersPayload() {
     byUser.set(address, existing);
   }
 
-  const players = Array.from(byUser.values()).sort(
-    (a, b) => b.lastBetAt - a.lastBetAt || b.totalBet - a.totalBet,
-  );
+  const players = Array.from(byUser.values())
+    .sort((a, b) => b.lastBetAt - a.lastBetAt || b.totalBet - a.totalBet)
+    .slice(0, 20);
   return { type: "active_players", count: players.length, players };
 }
 
@@ -630,7 +771,26 @@ async function resolveBet(betKey) {
 
   if (info.user) {
     updateLeaderboard(info.user, info.bet_amount, payout, won);
-    broadcast(JSON.stringify(leaderboardPayload()));
+    leaderboardDirty = true; // throttled broadcast via 2s interval
+
+    // Referral reward logic (0.5% of bet amount)
+    if (profileService.isEnabled()) {
+      (async () => {
+        try {
+          const settings = await profileService.getSettingsForWallet(info.user);
+          if (settings.referredBy) {
+            const reward = info.bet_amount * 0.005;
+            await profileService.creditReferralReward({
+              referrerWallet: settings.referredBy,
+              rewardAmount: reward,
+            });
+            console.log(`[REFERRAL] ${reward.toFixed(4)} SPRM awarded to ${settings.referredBy} (inviter of ${info.user})`);
+          }
+        } catch (err) {
+          console.error("[REFERRAL] reward error:", err.message);
+        }
+      })();
+    }
   }
   broadcastActivePlayers();
 }
@@ -944,7 +1104,27 @@ app.prepare().then(async () => {
   initBinance();
   try {
     const profileReady = await profileService.init();
-    if (!profileReady) {
+    if (profileReady) {
+      const dbLeaderboard = await profileService.getGlobalLeaderboard(50);
+      for (const entry of dbLeaderboard) {
+        leaderboard.set(entry.address, entry);
+      }
+      console.log(`[PROFILE] Leaderboard seeded with ${dbLeaderboard.length} entries from database`);
+
+      // Refresh leaderboard from DB every 5 minutes
+      setInterval(async () => {
+        try {
+          const refreshed = await profileService.getGlobalLeaderboard(50);
+          for (const entry of refreshed) {
+            leaderboard.set(entry.address, entry);
+          }
+          leaderboardDirty = true;
+          console.log(`[PROFILE] Leaderboard refreshed from database (${refreshed.length} entries)`);
+        } catch (err) {
+          console.error("[PROFILE] Leaderboard refresh failed:", err.message);
+        }
+      }, 5 * 60 * 1000);
+    } else {
       console.warn(
         "[PROFILE] backend disabled (check SUPABASE_DB_URL/DATABASE_URL and npm dependencies)",
       );
@@ -980,13 +1160,45 @@ app.prepare().then(async () => {
     // ── /register-bet: client POSTs bet info so server can auto-resolve ──
     // Accepts: { betId, user, box_x, box_row, mult_num, bet_amount }
     if (req.method === "POST" && pathname === "/register-bet") {
+      // Rate limit by IP
+      const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+      if (!checkRateLimit(clientIp)) {
+        res.writeHead(429, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Rate limit exceeded. Max 60 registrations/minute." }));
+        return;
+      }
+
       let body = "";
       req.on("data", (chunk) => { body += chunk; });
       req.on("end", () => {
         try {
           const msg = JSON.parse(body);
+
+          // Market pause check
+          if (bettingPaused) {
+            res.writeHead(503, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "market_paused" }));
+            return;
+          }
+
+          // Input validation
+          const validationError = validateBetPayload(msg);
+          if (validationError) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: validationError }));
+            return;
+          }
+
           // betId is the uint256 contract bet ID (string or number)
           const betKey = String(msg.betId ?? msg.betPda ?? "");
+
+          if (msg.user && profileService.isEnabled()) {
+            profileService.ensureReferralCode(msg.user).catch(() => { });
+            if (msg.referralCode) {
+              profileService.handleReferral({ userWallet: msg.user, referralCode: msg.referralCode })
+                .catch(err => console.error("[REFERRAL] POST handler error:", err.message));
+            }
+          }
           if (betKey && !pendingBets.has(betKey)) {
             const betColX = Math.floor(msg.box_x / COLUMN_WIDTH) * COLUMN_WIDTH;
             const curColX = Math.floor(serverCurrentX / COLUMN_WIDTH) * COLUMN_WIDTH;
@@ -999,21 +1211,21 @@ app.prepare().then(async () => {
                 `[BET] REJECTED (too historically detached): box_x=${msg.box_x} colsAhead=${colsAhead}`,
               );
               res.writeHead(400, { "Content-Type": "application/json" });
-              res.end(JSON.stringify({ error: "Bet registration too historically detached" }));
+              res.end(JSON.stringify({ ok: false, error: "Bet registration too historically detached" }));
               return;
             }
             pendingBets.set(betKey, {
               betId: String(msg.betId ?? ""),
               user: msg.user,
-              box_x: msg.box_x,
-              box_row: msg.box_row,
-              mult_num: msg.mult_num ?? 150,
-              bet_amount: msg.bet_amount ?? 1,
+              box_x: Number(msg.box_x),
+              box_row: Number(msg.box_row),
+              mult_num: Number(msg.mult_num),
+              bet_amount: Number(msg.bet_amount),
               lastBetAt: Date.now(),
             });
             if (msg.user) lookupNickname(msg.user);
             console.log(
-              `[BET] Registered via HTTP: betId=${betKey} box_x=${msg.box_x} row=${msg.box_row} mult=${msg.mult_num ?? 150}/100 colsAhead=${colsAhead}`,
+              `[BET] Registered via HTTP: betId=${betKey} box_x=${msg.box_x} row=${msg.box_row} mult=${msg.mult_num}/100 colsAhead=${colsAhead}`,
             );
             broadcastActivePlayers();
           }
@@ -1021,7 +1233,7 @@ app.prepare().then(async () => {
           res.end(JSON.stringify({ ok: true }));
         } catch (e) {
           res.writeHead(400);
-          res.end(JSON.stringify({ error: e.message }));
+          res.end(JSON.stringify({ ok: false, error: e.message }));
         }
       });
       return;
@@ -1045,6 +1257,8 @@ app.prepare().then(async () => {
   let broadcastCount = 0;
   setInterval(async () => {
     if (clients.size === 0) return;
+
+    checkAndUpdateMarketPause();
 
     serverCurrentX += PX_PER_EVENT;
     broadcastCount++;
@@ -1184,6 +1398,8 @@ app.prepare().then(async () => {
         history: historyBuffer.slice(),
         currentX: serverCurrentX,
         multHistory: multHistory.slice(),
+        houseBank: houseBankBalance,
+        marketPaused: bettingPaused,
       }),
     );
 
@@ -1248,8 +1464,22 @@ app.prepare().then(async () => {
           }
         } else if (msg.type === "register_bet") {
           // msg: { betId, user, box_x, box_row, mult_num, bet_amount }
+          if (bettingPaused) return; // silently drop when market paused
+          const wsValidErr = validateBetPayload(msg);
+          if (wsValidErr) { console.warn(`[BET] WS validation failed: ${wsValidErr}`); return; }
+
+          if (msg.user && profileService.isEnabled()) {
+            // Ensure user has a referral code
+            profileService.ensureReferralCode(msg.user).catch(() => { });
+            // Handle incoming referral if present
+            if (msg.referralCode) {
+              profileService.handleReferral({ userWallet: msg.user, referralCode: msg.referralCode })
+                .catch((err) => console.error("[REFERRAL] handler error:", err.message));
+            }
+          }
+
           const betKey = String(msg.betId ?? msg.betPda ?? "");
-          const betColX = Math.floor(msg.box_x / COLUMN_WIDTH) * COLUMN_WIDTH;
+          const betColX = Math.floor(Number(msg.box_x) / COLUMN_WIDTH) * COLUMN_WIDTH;
           const curColX = Math.floor(serverCurrentX / COLUMN_WIDTH) * COLUMN_WIDTH;
           const colsAhead = (betColX - curColX) / COLUMN_WIDTH;
           if (!pendingBets.has(betKey)) {
@@ -1259,10 +1489,10 @@ app.prepare().then(async () => {
               pendingBets.set(betKey, {
                 betId: String(msg.betId ?? ""),
                 user: msg.user,
-                box_x: msg.box_x,
-                box_row: msg.box_row,
-                mult_num: msg.mult_num ?? 150,
-                bet_amount: msg.bet_amount ?? 1,
+                box_x: Number(msg.box_x),
+                box_row: Number(msg.box_row),
+                mult_num: Number(msg.mult_num),
+                bet_amount: Number(msg.bet_amount),
                 lastBetAt: Date.now(),
               });
               if (msg.user) lookupNickname(msg.user);

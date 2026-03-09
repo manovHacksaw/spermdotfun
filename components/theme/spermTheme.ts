@@ -1,35 +1,35 @@
 export const spermTheme = {
-  /** Deep navy casino base */
-  bgBase: '#080B14',
-  bgPanel: '#0D1120',
-  bgCard: '#111827',
-  bgHover: '#1a2235',
+  /** Deep AVAX-inspired dark base */
+  bgBase: '#0B0B0F',
+  bgPanel: '#0F1319',
+  bgCard: '#11141A',
+  bgHover: '#161D26',
 
   /** Legacy aliases — kept for compatibility */
-  bgElevated: 'rgba(13,17,32,0.95)',
-  bgGlass: 'rgba(8,11,20,0.7)',
-  bgGlassStrong: 'rgba(6,8,16,0.85)',
-  bgChrome: 'rgba(13,17,32,0.9)',
-  bgChromeStrong: 'rgba(8,11,20,0.95)',
-  bgChromeSoft: 'rgba(17,24,39,0.7)',
+  bgElevated: 'rgba(15,19,25,0.96)',
+  bgGlass: 'rgba(11,11,15,0.72)',
+  bgGlassStrong: 'rgba(9,9,13,0.88)',
+  bgChrome: 'rgba(15,19,25,0.92)',
+  bgChromeStrong: 'rgba(11,11,15,0.96)',
+  bgChromeSoft: 'rgba(17,20,26,0.72)',
 
-  /** Casino borders */
+  /** Borders */
   borderChrome: 'rgba(255,255,255,0.06)',
   borderSoft: 'rgba(255,255,255,0.04)',
-  borderFaint: 'rgba(255,255,255,0.02)',
-  borderAccent: 'rgba(139,92,246,0.3)',
+  borderFaint: 'rgba(255,255,255,0.025)',
+  borderAccent: 'rgba(232,65,66,0.32)',
 
   /** Typography */
-  textPrimary: '#F1F5F9',
-  textSecondary: '#94A3B8',
-  textTertiary: '#475569',
+  textPrimary: '#E6E8EB',
+  textSecondary: '#9BA3AF',
+  textTertiary: '#4B5563',
 
-  /** Primary purple accent */
-  accent: '#8B5CF6',
-  accentBright: '#A78BFA',
-  accentSoft: 'rgba(139,92,246,0.12)',
-  accentBorder: 'rgba(139,92,246,0.35)',
-  accentGlow: 'rgba(139,92,246,0.25)',
+  /** Primary accent: Avalanche Red */
+  accent: '#E84142',
+  accentBright: '#FF5A5F',
+  accentSoft: 'rgba(232,65,66,0.10)',
+  accentBorder: 'rgba(232,65,66,0.32)',
+  accentGlow: 'rgba(232,65,66,0.20)',
 
   /** Gold for big wins / multipliers */
   gold: '#F59E0B',

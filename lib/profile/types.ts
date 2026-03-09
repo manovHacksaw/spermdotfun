@@ -1,4 +1,4 @@
-export type ProfileTab = 'stats' | 'transfer' | 'transactions' | 'settings'
+export type ProfileTab = 'stats' | 'transfer' | 'transactions' | 'settings' | 'referrals'
 
 export type ProfileTimeFilter = '24H' | '7D' | '1M' | 'ALL'
 
@@ -8,6 +8,8 @@ export interface ProfileSettings {
   avatarDataUrl: string | null
   clientSeed: string
   referralCode: string
+  referredBy: string | null
+  referralEarned: number
   volume: number
 }
 

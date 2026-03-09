@@ -9,43 +9,43 @@ import { spermTheme } from '@/components/theme/spermTheme'
 const COLUMN_WIDTH_BASE = 50
 const ROW_HEIGHT_BASE = 45 // Base row height
 const ROW_COUNT = 500
-const POINTER_LEFT_FRAC = 0.30
 const MAX_HISTORY = 4000
 const PRICE_AXIS_WIDTH = 60
 
 
-// ── Colour palette ──────────────────────────────────────────────────────────────
+// ── Colour palette — Avalanche red/black/white ──────────────────────────────────
+const AVAX_RED = '#E84142'
 const C = {
-  bg: spermTheme.bgBase,
-  gridLine: 'rgba(245,245,242,0.05)',
-  dot: 'rgba(245,245,242,0.18)',
-  multDim: 'rgba(245,245,242,0.40)',
-  multMid: 'rgba(245,245,242,0.70)',
-  multActive: 'rgba(245,245,242,1)',
-  line: 'rgba(245,245,242,0.82)',
-  lineGlow: 'rgba(197,140,255,0.18)',
-  pastBox: 'rgba(197,140,255,',
-  pointer: 'rgba(245,245,242,0.85)',
-  header: 'rgba(15,12,26,0.92)',
-  headerLine: 'rgba(245,245,242,0.18)',
-  title: spermTheme.textPrimary,
+  bg: '#050709',                          // near-black base
+  gridLine: 'rgba(255,255,255,0.04)',
+  dot: 'rgba(255,255,255,0.14)',
+  multDim: 'rgba(255,255,255,0.32)',
+  multMid: 'rgba(255,255,255,0.65)',
+  multActive: '#FFFFFF',
+  line: 'rgba(255,255,255,0.80)',
+  lineGlow: 'rgba(232,65,66,0.20)',
+  pastBox: 'rgba(232,65,66,',             // Avalanche red visited highlight
+  pointer: 'rgba(255,255,255,0.90)',
+  header: 'rgba(5,7,9,0.95)',
+  headerLine: 'rgba(232,65,66,0.25)',
+  title: '#FFFFFF',
   liveGreen: spermTheme.success,
-  liveRed: spermTheme.error,
-  hoverFill: 'rgba(197,140,255,0.09)',
-  hoverBorder: 'rgba(245,245,242,0.55)',
-  selFill: 'rgba(197,140,255,0.16)',
-  selBorder: 'rgba(197,140,255,0.72)',
-  vrfWinRow: 'rgba(197,140,255,0.14)',
-  vrfWinBorder: 'rgba(197,140,255,0.48)',
+  liveRed: AVAX_RED,
+  hoverFill: 'rgba(232,65,66,0.08)',
+  hoverBorder: 'rgba(255,255,255,0.50)',
+  selFill: 'rgba(232,65,66,0.18)',
+  selBorder: 'rgba(232,65,66,0.80)',
+  vrfWinRow: 'rgba(232,65,66,0.12)',
+  vrfWinBorder: 'rgba(232,65,66,0.45)',
 }
 
-// ── Ghost colors (single-hue neutral/orchid variants for other users' selections) ─
+// ── Ghost colors (red variants for other users' selections) ──────────────────────
 const GHOST_COLORS = [
-  { fill: 'rgba(245,245,242,0.05)', border: 'rgba(245,245,242,0.20)', text: 'rgba(245,245,242,0.56)' },
-  { fill: 'rgba(197,140,255,0.06)', border: 'rgba(197,140,255,0.24)', text: 'rgba(214,182,244,0.64)' },
-  { fill: 'rgba(197,140,255,0.08)', border: 'rgba(197,140,255,0.30)', text: 'rgba(221,193,247,0.70)' },
-  { fill: 'rgba(197,140,255,0.10)', border: 'rgba(197,140,255,0.34)', text: 'rgba(229,208,250,0.74)' },
-  { fill: 'rgba(197,140,255,0.12)', border: 'rgba(197,140,255,0.38)', text: 'rgba(236,220,252,0.78)' },
+  { fill: 'rgba(255,255,255,0.04)', border: 'rgba(255,255,255,0.18)', text: 'rgba(255,255,255,0.50)' },
+  { fill: 'rgba(232,65,66,0.05)', border: 'rgba(232,65,66,0.22)', text: 'rgba(255,140,141,0.60)' },
+  { fill: 'rgba(232,65,66,0.07)', border: 'rgba(232,65,66,0.28)', text: 'rgba(255,150,151,0.66)' },
+  { fill: 'rgba(232,65,66,0.09)', border: 'rgba(232,65,66,0.33)', text: 'rgba(255,160,161,0.72)' },
+  { fill: 'rgba(232,65,66,0.11)', border: 'rgba(232,65,66,0.38)', text: 'rgba(255,170,171,0.78)' },
 ]
 const MAX_GHOST_BOXES = 5
 
@@ -98,6 +98,8 @@ export default function StockGrid() {
     currentPrice: 0,
     lerpY: 0.0, // Client-side interpolated Y for smoothness
     zoom: 1.0,
+    marketPaused: false,
+    isMobile: false,
   })
 
   // ── Resize ──────────────────────────────────────────────────────────────────
@@ -109,6 +111,9 @@ export default function StockGrid() {
     c.height = Math.floor(height)
     state.current.W = c.width
     state.current.H = c.height
+    state.current.isMobile = width < 768
+    // Auto-zoom out slightly on mobile
+    state.current.zoom = state.current.isMobile ? 0.85 : 1.0
   }
 
   function yToRow(ny: number): number {
@@ -142,8 +147,10 @@ export default function StockGrid() {
     const colW = COLUMN_WIDTH_BASE * zoom
     const rowH = ROW_HEIGHT_BASE * zoom
 
+    const ptrFrac = s.isMobile ? 0.45 : 0.30
+
     // Viewport calculation
-    const rightMargin = Math.round(W * (1 - POINTER_LEFT_FRAC))
+    const rightMargin = Math.round(W * (1 - ptrFrac))
     const viewX = s.currentX * zoom - (W - rightMargin)
 
     // Vertical Camera logic: follow the interpolated pointer Y
@@ -175,7 +182,7 @@ export default function StockGrid() {
     for (let r = firstRowVisible; r <= lastRowVisible; r++) {
       const y = r * rowH - viewY
       const opacity = r % 5 === 0 ? 0.08 : 0.03
-      ctx.strokeStyle = `rgba(212, 170, 255, ${opacity})`
+      ctx.strokeStyle = `rgba(232,65,66,${opacity})`
       ctx.beginPath()
       ctx.moveTo(PRICE_AXIS_WIDTH, y)
       ctx.lineTo(W, y)
@@ -185,7 +192,7 @@ export default function StockGrid() {
     for (const col of s.columns) {
       const sx = col.x * zoom - viewX
       if (sx < PRICE_AXIS_WIDTH || sx > W) continue
-      ctx.strokeStyle = `rgba(212, 170, 255, 0.03)`
+      ctx.strokeStyle = `rgba(232,65,66,0.04)`
       ctx.beginPath()
       ctx.moveTo(sx, 0)
       ctx.lineTo(sx, H)
@@ -246,7 +253,7 @@ export default function StockGrid() {
             ctx.strokeStyle = isExactRow
               ? 'rgba(245,245,242,0.82)'
               : isCurrent
-                ? `rgba(197,140,255,${borderAlpha.toFixed(2)})`
+                ? `rgba(232,65,66,${borderAlpha.toFixed(2)})`
                 : `rgba(245,245,242,${borderAlpha.toFixed(2)})`
             ctx.lineWidth = isExactRow ? 1.8 : 1.2
             drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
@@ -283,31 +290,73 @@ export default function StockGrid() {
           continue
         }
 
-        // Pending selection — with pulse animation
+        // Pending selection — multi-layer pulse animation
         if (isPending) {
-          const pulse = (Math.sin(now / 200) + 1) / 2
-          ctx.fillStyle = C.selFill
+          const pulse = (Math.sin(now / 300) + 1) / 2   // 0→1 slow breathe
+          const pulse2 = (Math.sin(now / 150) + 1) / 2   // 0→1 fast inner ring
+          const cx = sx + colW / 2
+          const cy = boxTop + rowH / 2
+
+          // Layer 1: outer radial glow (large, soft)
+          ctx.save()
+          const outerGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, colW * 0.85)
+          outerGlow.addColorStop(0, `rgba(232,65,66,${(0.18 + pulse * 0.12).toFixed(2)})`)
+          outerGlow.addColorStop(1, 'rgba(232,65,66,0)')
+          ctx.fillStyle = outerGlow
+          ctx.beginPath()
+          ctx.ellipse(cx, cy, colW * 0.85, rowH * 0.85, 0, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.restore()
+
+          // Layer 2: filled background — pulsing opacity
+          ctx.fillStyle = `rgba(232,65,66,${(0.08 + pulse * 0.10).toFixed(2)})`
           drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
           ctx.fill()
 
-          ctx.strokeStyle = `rgba(197, 140, 255, ${0.45 + pulse * 0.45})`
-          ctx.lineWidth = 1.8 + pulse * 0.8
+          // Layer 3: sharp outer border with double-stroke glow
+          ctx.save()
+          ctx.shadowColor = 'rgba(232,65,66,0.70)'
+          ctx.shadowBlur = 14 + pulse * 14
+          ctx.strokeStyle = `rgba(255,90,95,${(0.55 + pulse2 * 0.40).toFixed(2)})`
+          ctx.lineWidth = 1.5 + pulse2 * 1.0
           drawRoundedRect(sx + 1.5, boxTop + 1.5, colW - 3, rowH - 3, roundRadius)
           ctx.stroke()
+          ctx.restore()
 
-          // Selection glow
-          ctx.shadowColor = 'rgba(197, 140, 255, 0.5)'
-          ctx.shadowBlur = 10 + pulse * 10
-          ctx.stroke()
-          ctx.shadowBlur = 0
+          // Layer 4: inner ring — tight bright pulse
           ctx.save()
-          ctx.shadowColor = spermTheme.accentGlow
-          ctx.shadowBlur = 8
-          ctx.fillStyle = C.multActive
-          ctx.font = `800 ${12 * zoom}px 'Outfit', sans-serif`
+          ctx.shadowColor = '#FF5A5F'
+          ctx.shadowBlur = 6 + pulse2 * 8
+          ctx.strokeStyle = `rgba(255,120,121,${(0.30 + pulse2 * 0.50).toFixed(2)})`
+          ctx.lineWidth = 0.8
+          drawRoundedRect(sx + 3, boxTop + 3, colW - 6, rowH - 6, Math.max(2, roundRadius - 1))
+          ctx.stroke()
+          ctx.restore()
+
+          // Layer 5: center bright dot
+          ctx.save()
+          const dotR = Math.min(colW, rowH) * (0.06 + pulse * 0.03)
+          const dotGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, dotR * 2)
+          dotGrad.addColorStop(0, `rgba(255,200,200,${(0.85 + pulse * 0.15).toFixed(2)})`)
+          dotGrad.addColorStop(0.4, `rgba(232,65,66,${(0.60 + pulse * 0.25).toFixed(2)})`)
+          dotGrad.addColorStop(1, 'rgba(232,65,66,0)')
+          ctx.fillStyle = dotGrad
+          ctx.shadowColor = '#FF5A5F'
+          ctx.shadowBlur = 10 + pulse * 8
+          ctx.beginPath()
+          ctx.arc(cx, cy, dotR * 2, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.restore()
+
+          // Layer 6: multiplier text — JetBrains Mono with glow
+          ctx.save()
+          ctx.shadowColor = 'rgba(255,90,95,0.80)'
+          ctx.shadowBlur = 10 + pulse * 6
+          ctx.fillStyle = `rgba(255,${Math.round(210 + pulse2 * 45)},${Math.round(210 + pulse2 * 45)},1)`
+          ctx.font = `700 ${12 * zoom}px 'JetBrains Mono', monospace`
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillText(`${mult}×`, sx + colW / 2, boxTop + rowH / 2)
+          ctx.fillText(`${mult}×`, cx, cy)
           ctx.restore()
           ctx.textBaseline = 'alphabetic'
           continue
@@ -398,7 +447,7 @@ export default function StockGrid() {
 
     // Soft glow behind head
     const grd = ctx.createRadialGradient(dotX, dotY, 0, dotX, dotY, 25)
-    grd.addColorStop(0, 'rgba(197,140,255,0.28)')
+    grd.addColorStop(0, 'rgba(232,65,66,0.28)')
     grd.addColorStop(0.4, 'rgba(255,255,255,0.1)')
     grd.addColorStop(1, 'rgba(255,255,255,0)')
     ctx.fillStyle = grd
@@ -442,7 +491,7 @@ export default function StockGrid() {
     // Outer glow/border on tail
     for (const seg of segs) {
       const alpha = 0.28 * Math.pow(1 - seg.frac, 1.2)
-      ctx.strokeStyle = `rgba(197,140,255,${alpha.toFixed(2)})`
+      ctx.strokeStyle = `rgba(232,65,66,${alpha.toFixed(2)})`
       ctx.lineWidth = (MAX_WIDTH + BORDER_PAD) * (1 - seg.frac)
       ctx.lineCap = 'round'
       ctx.beginPath()
@@ -472,8 +521,8 @@ export default function StockGrid() {
     // Outer refraction glow
     const headGrd = ctx.createRadialGradient(2, 0, 0, 0, 0, 12)
     headGrd.addColorStop(0, 'rgba(255,255,255,0.4)')
-    headGrd.addColorStop(0.6, 'rgba(212,170,255,0.15)')
-    headGrd.addColorStop(1, 'rgba(212,170,255,0)')
+    headGrd.addColorStop(0.6, 'rgba(232,65,66,0.12)')
+    headGrd.addColorStop(1, 'rgba(232,65,66,0)')
 
     ctx.fillStyle = headGrd
     ctx.beginPath()
@@ -489,7 +538,7 @@ export default function StockGrid() {
 
     ctx.fillStyle = '#020205'
     ctx.fill()
-    ctx.strokeStyle = 'rgba(212,170,255,0.6)'
+    ctx.strokeStyle = 'rgba(232,65,66,0.7)'
     ctx.lineWidth = 1.2
     ctx.stroke()
 
@@ -498,9 +547,9 @@ export default function StockGrid() {
     ctx.arc(2, 0, 4.5, 0, Math.PI * 2)
     const coreGrd = ctx.createLinearGradient(-4, -4, 4, 4)
     coreGrd.addColorStop(0, '#FFFFFF')
-    coreGrd.addColorStop(1, '#D4AAFF')
+    coreGrd.addColorStop(1, '#E84142')
     ctx.fillStyle = coreGrd
-    ctx.shadowColor = '#D4AAFF'
+    ctx.shadowColor = '#E84142'
     ctx.shadowBlur = 10
     ctx.fill()
     ctx.shadowBlur = 0
@@ -553,13 +602,13 @@ export default function StockGrid() {
       if (r % 5 === 0) {
         ctx.fillStyle = spermTheme.textPrimary
         ctx.fillText(rowToPrice(r), PRICE_AXIS_WIDTH - 8, y)
-        ctx.strokeStyle = 'rgba(212, 170, 255, 0.25)'
+        ctx.strokeStyle = 'rgba(232,65,66,0.30)'
         ctx.beginPath()
         ctx.moveTo(PRICE_AXIS_WIDTH - 5, y)
         ctx.lineTo(PRICE_AXIS_WIDTH, y)
         ctx.stroke()
       } else {
-        ctx.strokeStyle = 'rgba(212, 170, 255, 0.1)'
+        ctx.strokeStyle = 'rgba(232,65,66,0.12)'
         ctx.beginPath()
         ctx.moveTo(PRICE_AXIS_WIDTH - 3, y)
         ctx.lineTo(PRICE_AXIS_WIDTH, y)
@@ -579,7 +628,7 @@ export default function StockGrid() {
 
       ctx.save()
       ctx.setLineDash([5, 5])
-      ctx.strokeStyle = 'rgba(197, 140, 255, 0.25)'
+      ctx.strokeStyle = 'rgba(232,65,66,0.30)'
       ctx.lineWidth = 1.5
       ctx.beginPath()
       ctx.moveTo(dotX, dotY)
@@ -589,7 +638,7 @@ export default function StockGrid() {
       ctx.restore()
 
       // Ghost target highlight
-      ctx.fillStyle = 'rgba(197, 140, 255, 0.08)'
+      ctx.fillStyle = 'rgba(232,65,66,0.08)'
       const hSX = hX - colW / 2 - viewX
       const hSY = s.hoverBox.row * rowH - viewY
       drawRoundedRect(hSX + 1.5, hSY + 1.5, colW - 3, rowH - 3, roundRadius)
@@ -605,7 +654,7 @@ export default function StockGrid() {
       ctx.fillStyle = 'rgba(16, 12, 26, 0.75)'
       drawRoundedRect(badgeX, badgeY, badgeW, badgeH, 6)
       ctx.fill()
-      ctx.strokeStyle = 'rgba(197, 140, 255, 0.4)'
+      ctx.strokeStyle = 'rgba(232,65,66,0.45)'
       ctx.lineWidth = 1.2
       ctx.stroke()
 
@@ -646,7 +695,43 @@ export default function StockGrid() {
         ctx.restore()
       }
     }
-  } // This is the correct closing brace for the `draw` function.
+
+    // ── Market Pause Overlay ──
+    if (s.marketPaused) {
+      ctx.save()
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
+      ctx.fillRect(0, 0, W, H)
+
+      const bannerH = 100
+      ctx.fillStyle = 'rgba(10, 10, 15, 0.85)'
+      ctx.fillRect(0, H / 2 - bannerH / 2, W, bannerH)
+
+      ctx.strokeStyle = '#E84142'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(0, H / 2 - bannerH / 2)
+      ctx.lineTo(W, H / 2 - bannerH / 2)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(0, H / 2 + bannerH / 2)
+      ctx.lineTo(W, H / 2 + bannerH / 2)
+      ctx.stroke()
+
+      ctx.fillStyle = '#fff'
+      ctx.font = '700 24px "Outfit", sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.shadowColor = 'rgba(232, 65, 66, 0.8)'
+      ctx.shadowBlur = 15
+      ctx.fillText('FEED PAUSED — BETTING DISABLED', W / 2, H / 2 - 10)
+
+      ctx.font = '500 14px "Inter", sans-serif'
+      ctx.fillStyle = 'rgba(255,255,255,0.6)'
+      ctx.shadowBlur = 0
+      ctx.fillText('The price feed is temporarily stale. Waiting for Binance data...', W / 2, H / 2 + 25)
+      ctx.restore()
+    }
+  } // End draw function
 
   // ── Render loop ──────────────────────────────────────────────────────────────
   function loop() {
@@ -934,6 +1019,10 @@ export default function StockGrid() {
             if (set.size === 0) s.ghostAll.delete(key)
           }
           resampleGhosts(s)
+        } else if (data.type === 'market_paused') {
+          s.marketPaused = data.paused
+        } else if (data.type === 'house_bank') {
+          window.dispatchEvent(new CustomEvent('sprmfun:house_bank', { detail: data }))
         }
       }
     }
@@ -964,7 +1053,9 @@ export default function StockGrid() {
       const zoom = s.zoom
       const W = s.W, H = s.H
       if (!W || !H) return null
-      const rightMargin = Math.round(W * (1 - POINTER_LEFT_FRAC))
+
+      const ptrFrac = s.isMobile ? 0.45 : 0.30
+      const rightMargin = Math.round(W * (1 - ptrFrac))
       const viewX = (s.currentX * zoom) - (W - rightMargin)
       const absX = mouseX + viewX
       const colX = Math.floor(absX / (COLUMN_WIDTH_BASE * zoom)) * COLUMN_WIDTH_BASE
@@ -993,9 +1084,20 @@ export default function StockGrid() {
       ws.send(JSON.stringify({ type, colX, row, shortAddr }))
     }
 
-    function onClick(e: MouseEvent) {
+    function onClick(e: MouseEvent | TouchEvent) {
+      if (s.marketPaused) return
       const rect = canvas.getBoundingClientRect()
-      const box = getBoxAt(e.clientX - rect.left, e.clientY - rect.top)
+
+      let clientX, clientY
+      if ('touches' in e) {
+        clientX = e.touches[0].clientX
+        clientY = e.touches[0].clientY
+      } else {
+        clientX = e.clientX
+        clientY = e.clientY
+      }
+
+      const box = getBoxAt(clientX - rect.left, clientY - rect.top)
       if (!box) return
       const key = `${box.colX}_${box.row}`
       const existing = s.selections.get(key)
@@ -1019,6 +1121,19 @@ export default function StockGrid() {
       }
     }
 
+    function onTouchStart(e: TouchEvent) {
+      // Basic betting interaction on tap
+      onClick(e)
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      // Prevent scrolling while interacting with grid
+      if (s.marketPaused) return
+      const rect = canvas.getBoundingClientRect()
+      const box = getBoxAt(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top)
+      s.hoverBox = box
+    }
+
     function onMouseLeave() {
       s.hoverBox = null
       canvas.style.cursor = 'default'
@@ -1033,11 +1148,15 @@ export default function StockGrid() {
     canvas.addEventListener('mousemove', onMouseMove)
     canvas.addEventListener('click', onClick)
     canvas.addEventListener('mouseleave', onMouseLeave)
+    canvas.addEventListener('touchstart', onTouchStart, { passive: true })
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false })
     window.addEventListener('sprmfun:deselect', onDeselect)
     return () => {
       canvas.removeEventListener('mousemove', onMouseMove)
       canvas.removeEventListener('click', onClick)
       canvas.removeEventListener('mouseleave', onMouseLeave)
+      canvas.removeEventListener('touchstart', onTouchStart)
+      canvas.removeEventListener('touchmove', onTouchMove)
       window.removeEventListener('sprmfun:deselect', onDeselect)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

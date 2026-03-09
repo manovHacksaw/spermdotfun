@@ -17,6 +17,8 @@ import {
   BadgeDollarSign,
   ShieldCheck,
   LogOut,
+  TrendingUp,
+  MessageCircle,
 } from "lucide-react";
 import { useUsername } from "@/hooks/useUsername";
 import { useSessionWalletContext } from "@/context/SessionWalletContext";
@@ -39,7 +41,13 @@ function getAvatarColor(addr: string) {
   return palettes[Math.abs(h) % palettes.length];
 }
 
-export default function TopHeader() {
+export default function TopHeader({
+  onToggleBet,
+  onToggleChat
+}: {
+  onToggleBet?: () => void;
+  onToggleChat?: () => void
+}) {
   const router = useRouter();
   const { address, connected, disconnect, connect } = useEvmWallet();
   const { balance } = useSprmBalance(address);
@@ -51,6 +59,9 @@ export default function TopHeader() {
   const [vw, setVw] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth : 1200,
   );
+  const [marketPaused, setMarketPaused] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
+
   useEffect(() => {
     const onResize = () => setVw(window.innerWidth);
     window.addEventListener("resize", onResize);
@@ -81,13 +92,18 @@ export default function TopHeader() {
     const audio = new Audio("/delosound-energetic-sports-471133.mp3");
     audio.loop = true;
     audio.volume = volume / 100;
-    audio.play().catch(() => { });
     audioRef.current = audio;
+
+    // Only play if already interacted (e.g. from a previous session or if state allowed)
+    if (hasInteracted && !muted) {
+      audio.play().catch(() => { });
+    }
+
     return () => {
       audio.pause();
       audio.src = "";
     };
-  }, []);
+  }, [hasInteracted]); // Re-run when interaction occurs
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.muted = muted;
@@ -160,8 +176,16 @@ export default function TopHeader() {
       const detail = (e as CustomEvent<{ price: number }>).detail;
       setAvaxPrice(detail.price);
     };
+    const onMarketStatus = (e: Event) => {
+      const detail = (e as CustomEvent<{ paused: boolean }>).detail;
+      setMarketPaused(detail.paused);
+    };
     window.addEventListener("sprmfun:price", onPrice as EventListener);
-    return () => window.removeEventListener("sprmfun:price", onPrice as EventListener);
+    window.addEventListener("sprmfun:market_paused", onMarketStatus as EventListener);
+    return () => {
+      window.removeEventListener("sprmfun:price", onPrice as EventListener);
+      window.removeEventListener("sprmfun:market_paused", onMarketStatus as EventListener);
+    };
   }, []);
 
   // ── Outside click ─────────────────────────────────────────────────────────
@@ -197,9 +221,9 @@ export default function TopHeader() {
   ];
 
   const NAV_ITEMS = [
-    { label: "PLAY",        href: "/",          active: true  },
-    { label: "LEADERBOARD", href: "/profile",    active: false },
-    { label: "FAUCET",      href: "/faucet",     active: false },
+    { label: "PLAY", href: "/", active: true },
+    { label: "LEADERBOARD", href: "/profile", active: false },
+    { label: "FAUCET", href: "/faucet", active: false },
   ];
 
   return (
@@ -281,192 +305,389 @@ export default function TopHeader() {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 6,
-            background: "rgba(139,92,246,0.06)",
-            border: `1px solid ${spermTheme.borderAccent}`,
-            borderRadius: 6,
-            padding: "5px 10px",
-            fontFamily: "'JetBrains Mono', monospace",
+            gap: 12,
+            background: spermTheme.bgCard,
+            border: `1px solid ${spermTheme.borderChrome}`,
+            borderRadius: 7,
+            padding: "4px 10px",
+            height: btnSize,
           }}
         >
+          {/* Market Status Badge */}
           <div
             style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: spermTheme.success,
-              boxShadow: `0 0 6px ${spermTheme.success}`,
-              animation: "pulse-dot 2s infinite",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              paddingRight: 8,
+              borderRight: `1px solid ${spermTheme.borderFaint}`,
             }}
-          />
-          <span style={{ fontSize: 10, color: spermTheme.textSecondary, fontWeight: 600, letterSpacing: 0.5 }}>AVAX</span>
-          <span style={{ fontSize: 13, color: spermTheme.textPrimary, fontWeight: 700 }}>${avaxPrice.toFixed(2)}</span>
+          >
+            <div
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                background: marketPaused ? spermTheme.error : spermTheme.success,
+                boxShadow: `0 0 8px ${marketPaused ? spermTheme.error : spermTheme.success}`,
+                animation: marketPaused ? "none" : "pulse-dot 2s infinite",
+              }}
+            />
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                letterSpacing: 1,
+                color: marketPaused ? spermTheme.error : spermTheme.success,
+              }}
+            >
+              {marketPaused ? "PAUSED" : "LIVE"}
+            </span>
+          </div>
+
+          {/* AVAX Price */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'JetBrains Mono', monospace" }}>
+            <span style={{ fontSize: 10, color: spermTheme.textSecondary, fontWeight: 600, letterSpacing: 0.5 }}>AVAX</span>
+            <span style={{ fontSize: 13, color: spermTheme.textPrimary, fontWeight: 700 }}>${avaxPrice.toFixed(2)}</span>
+          </div>
         </div>
       )}
 
-        {/* ── RIGHT CLUSTER ── */}
-        <div
+      {/* Audio Consent Prompt */}
+      {!hasInteracted && (
+        <button
+          onClick={() => {
+            setHasInteracted(true);
+            setMuted(false);
+          }}
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: isTiny ? 4 : 8,
-            minWidth: 0,
+            background: spermTheme.accent,
+            color: "#fff",
+            border: "none",
+            borderRadius: 6,
+            padding: "6px 14px",
+            fontSize: 11,
+            fontWeight: 800,
+            cursor: "pointer",
+            boxShadow: `0 0 15px ${spermTheme.accentGlow}`,
+            animation: "pulse-soft 2s infinite",
           }}
         >
-          {/* PRIMARY wallet dropdown */}
-          {connected &&
-            (() => {
-              const isPrimary = session.activeWallet === "primary";
-              const showInstant = !isPrimary && session.isActive;
-              const headerIcon = showInstant ? "⚡" : "💎";
-              const headerLabel = showInstant ? "INSTA" : "PRIMARY";
-              const headerBal = showInstant
-                ? (session.sessionSprmBalance?.toFixed(4) ?? "0.0000")
-                : balance !== null
-                  ? balance.toFixed(4)
-                  : "0.0000";
-              const headerColor = showInstant
-                ? spermTheme.accent
-                : spermTheme.textPrimary;
-              const headerBg = `linear-gradient(135deg, ${av1}, ${av2})`;
-              return (
-                <div ref={walletRef} style={{ position: "relative" }}>
-                  <button
-                    onClick={() => setWalletOpen((o) => !o)}
+          START EXPERIENCE
+        </button>
+      )}
+
+      {/* Volume Toggle */}
+      {hasInteracted && (
+        <button
+          onClick={() => setMuted(!muted)}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: muted ? spermTheme.textTertiary : spermTheme.textSecondary,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            padding: 4,
+          }}
+          aria-label={muted ? "Unmute" : "Mute"}
+        >
+          {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+        </button>
+      )}
+
+      {/* ── RIGHT CLUSTER ── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: isTiny ? 4 : 8,
+          minWidth: 0,
+        }}
+      >
+        {/* Mobile Toggles */}
+        {isTiny && (
+          <>
+            <button
+              onClick={onToggleBet}
+              style={{
+                width: 32,
+                height: 32,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: spermTheme.bgCard,
+                border: `1px solid ${spermTheme.borderChrome}`,
+                borderRadius: 7,
+                color: spermTheme.accent,
+                cursor: "pointer",
+              }}
+              title="Toggle Bet Slip"
+            >
+              <TrendingUp size={16} />
+            </button>
+            <button
+              onClick={onToggleChat}
+              style={{
+                width: 32,
+                height: 32,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: spermTheme.bgCard,
+                border: `1px solid ${spermTheme.borderChrome}`,
+                borderRadius: 7,
+                color: spermTheme.textPrimary,
+                cursor: "pointer",
+              }}
+              title="Toggle Social"
+            >
+              <MessageCircle size={16} />
+            </button>
+          </>
+        )}
+
+        {/* PRIMARY wallet dropdown */}
+        {connected &&
+          (() => {
+            const isPrimary = session.activeWallet === "primary";
+            const showInstant = !isPrimary && session.isActive;
+            const headerIcon = showInstant ? "⚡" : "💎";
+            const headerLabel = showInstant ? "INSTA" : "PRIMARY";
+            const headerBal = showInstant
+              ? (session.sessionSprmBalance?.toFixed(4) ?? "0.0000")
+              : balance !== null
+                ? balance.toFixed(4)
+                : "0.0000";
+            const headerColor = showInstant
+              ? spermTheme.accent
+              : spermTheme.textPrimary;
+            const headerBg = `linear-gradient(135deg, ${av1}, ${av2})`;
+            return (
+              <div ref={walletRef} style={{ position: "relative" }}>
+                <button
+                  onClick={() => setWalletOpen((o) => !o)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: isTiny ? 4 : 8,
+                    background: walletOpen ? spermTheme.accentSoft : spermTheme.bgCard,
+                    border: `1px solid ${walletOpen ? spermTheme.accentBorder : spermTheme.borderChrome}`,
+                    borderRadius: 7,
+                    padding: isTiny ? "0 8px" : "0 12px",
+                    height: btnSize,
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontFamily: "'JetBrains Mono', monospace",
+                    transition: "all 0.15s ease",
+                    minWidth: 0,
+                    overflow: "hidden",
+                  }}
+                >
+                  {!isTiny && (
+                    <div
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: 5,
+                        flexShrink: 0,
+                        background: headerBg,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 11,
+                        overflow: "hidden",
+                      }}
+                    >
+                      {headerIcon}
+                    </div>
+                  )}
+                  <div
                     style={{
                       display: "flex",
-                      alignItems: "center",
-                      gap: isTiny ? 4 : 8,
-                      background: walletOpen ? spermTheme.accentSoft : spermTheme.bgCard,
-                      border: `1px solid ${walletOpen ? spermTheme.accentBorder : spermTheme.borderChrome}`,
-                      borderRadius: 7,
-                      padding: isTiny ? "0 8px" : "0 12px",
-                      height: btnSize,
-                      color: "#fff",
-                      cursor: "pointer",
-                      fontFamily: "'JetBrains Mono', monospace",
-                      transition: "all 0.15s ease",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      lineHeight: 1.1,
                       minWidth: 0,
-                      overflow: "hidden",
                     }}
                   >
-                    {!isTiny && (
-                      <div
-                        style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: 5,
-                          flexShrink: 0,
-                          background: headerBg,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 11,
-                          overflow: "hidden",
-                        }}
-                      >
-                        {headerIcon}
-                      </div>
-                    )}
                     <div
                       style={{
+                        fontSize: 9,
+                        letterSpacing: 1,
+                        color: "rgba(245,245,242,0.58)",
+                        marginBottom: 2,
+                      }}
+                    >
+                      {headerLabel}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: isTiny ? 11 : 13,
+                        fontWeight: 700,
+                        color: headerColor,
+                        fontFamily: "inherit",
+                        lineHeight: 1,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {headerBal} SPRM
+                    </div>
+                  </div>
+                  <ChevronDown
+                    size={16}
+                    style={{
+                      color: "rgba(245,245,242,0.46)",
+                      transform: walletOpen ? "rotate(180deg)" : "none",
+                      transition: "transform 0.15s",
+                    }}
+                  />
+                </button>
+
+                {walletOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 10px)",
+                      right: 0,
+                      width: 320,
+                      borderRadius: 8,
+                      border: `1px solid ${spermTheme.borderChrome}`,
+                      background: spermTheme.bgPanel,
+                      backdropFilter: "blur(32px)",
+                      WebkitBackdropFilter: "blur(32px)",
+                      boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+                      zIndex: 420,
+                    }}
+                  >
+                    <div
+                      style={{
+                        borderRadius: 15,
+                        padding: "11px 10px 10px",
                         display: "flex",
                         flexDirection: "column",
-                        alignItems: "flex-start",
-                        lineHeight: 1.1,
-                        minWidth: 0,
+                        gap: 8,
                       }}
                     >
                       <div
                         style={{
-                          fontSize: 9,
+                          fontSize: 10,
+                          color: "rgba(245,245,242,0.56)",
                           letterSpacing: 1,
-                          color: "rgba(245,245,242,0.58)",
-                          marginBottom: 2,
+                          paddingLeft: 3,
                         }}
                       >
-                        {headerLabel}
+                        Select Wallet:
                       </div>
-                      <div
-                        style={{
-                          fontSize: isTiny ? 11 : 13,
-                          fontWeight: 700,
-                          color: headerColor,
-                          fontFamily: "inherit",
-                          lineHeight: 1,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {headerBal} SPRM
-                      </div>
-                    </div>
-                    <ChevronDown
-                      size={16}
-                      style={{
-                        color: "rgba(245,245,242,0.46)",
-                        transform: walletOpen ? "rotate(180deg)" : "none",
-                        transition: "transform 0.15s",
-                      }}
-                    />
-                  </button>
 
-                  {walletOpen && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "calc(100% + 10px)",
-                        right: 0,
-                        width: 320,
-                        borderRadius: 8,
-                        border: `1px solid ${spermTheme.borderChrome}`,
-                        background: spermTheme.bgPanel,
-                        backdropFilter: "blur(32px)",
-                        WebkitBackdropFilter: "blur(32px)",
-                        boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
-                        zIndex: 420,
-                      }}
-                    >
-                      <div
+                      {/* SPRM row (clickable selector) */}
+                      <button
+                        onClick={() => session.setActiveWallet("primary")}
                         style={{
-                          borderRadius: 15,
-                          padding: "11px 10px 10px",
                           display: "flex",
-                          flexDirection: "column",
-                          gap: 8,
+                          alignItems: "center",
+                          gap: 10,
+                          width: "100%",
+                          background:
+                            session.activeWallet === "primary"
+                              ? "rgba(232,65,66,0.10)"
+                              : "rgba(245,245,242,0.04)",
+                          border: `1px solid ${session.activeWallet === "primary" ? "rgba(232,65,66,0.38)" : "rgba(245,245,242,0.14)"}`,
+                          borderRadius: 10,
+                          padding: "9px 10px",
+                          cursor: "pointer",
+                          transition: "all 0.15s",
+                          textAlign: "left",
+                          fontFamily: "inherit",
                         }}
                       >
                         <div
                           style={{
-                            fontSize: 10,
-                            color: "rgba(245,245,242,0.56)",
-                            letterSpacing: 1,
-                            paddingLeft: 3,
+                            width: 32,
+                            height: 32,
+                            borderRadius: 9,
+                            background: `linear-gradient(135deg, ${av1}, ${av2})`,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 14,
+                            flexShrink: 0,
+                            overflow: "hidden",
                           }}
                         >
-                          Select Wallet:
+                          💎
                         </div>
+                        <div style={{ flex: 1, fontFamily: "'JetBrains Mono', monospace" }}>
+                          <div
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 800,
+                              color: spermTheme.textTertiary,
+                              marginBottom: 4,
+                              letterSpacing: 1.5
+                            }}
+                          >
+                            SPRM_PRIMARY
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 24,
+                              color: "#F5F5F2",
+                              fontWeight: 900,
+                              lineHeight: 1,
+                            }}
+                          >
+                            {balance !== null ? balance.toFixed(4) : "0.0000"}
+                          </div>
+                        </div>
+                        {session.activeWallet === "primary" && (
+                          <div
+                            style={{
+                              fontSize: 9,
+                              background: "rgba(232,65,66,0.14)",
+                              border: "1px solid rgba(232,65,66,0.42)",
+                              borderRadius: 4,
+                              padding: "2px 6px",
+                              color: "#C58CFF",
+                              fontWeight: 800,
+                              letterSpacing: 0.5,
+                            }}
+                          >
+                            ACTIVE
+                          </div>
+                        )}
+                      </button>
 
-                        {/* SPRM row (clickable selector) */}
-                        <button
-                          onClick={() => session.setActiveWallet("primary")}
+                      {/* ── INSTA WALLET (live) ── */}
+                      <div
+                        style={{
+                          background:
+                            session.activeWallet === "instant"
+                              ? "rgba(232,65,66,0.10)"
+                              : "rgba(245,245,242,0.04)",
+                          border: `1px solid ${session.activeWallet === "instant" && session.isActive ? "rgba(232,65,66,0.45)" : "rgba(245,245,242,0.14)"}`,
+                          borderRadius: 10,
+                          overflow: "hidden",
+                          transition: "all 0.15s",
+                        }}
+                      >
+                        {/* Header row (clickable when session is active) */}
+                        <div
+                          onClick={() => {
+                            if (session.isActive)
+                              session.setActiveWallet("instant");
+                          }}
                           style={{
                             display: "flex",
                             alignItems: "center",
                             gap: 10,
-                            width: "100%",
-                            background:
-                              session.activeWallet === "primary"
-                                ? "rgba(197,140,255,0.14)"
-                                : "rgba(245,245,242,0.04)",
-                            border: `1px solid ${session.activeWallet === "primary" ? "rgba(197,140,255,0.45)" : "rgba(245,245,242,0.14)"}`,
-                            borderRadius: 10,
                             padding: "9px 10px",
-                            cursor: "pointer",
-                            transition: "all 0.15s",
-                            textAlign: "left",
-                            fontFamily: "inherit",
+                            borderBottom: session.isActive
+                              ? "1px solid rgba(245,245,242,0.14)"
+                              : "none",
+                            cursor: session.isActive ? "pointer" : "default",
                           }}
                         >
                           <div
@@ -478,512 +699,450 @@ export default function TopHeader() {
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              fontSize: 14,
+                              fontSize: 18,
                               flexShrink: 0,
-                              overflow: "hidden",
                             }}
                           >
-                            💎
+                            👛
                           </div>
-                          <div style={{ flex: 1, fontFamily: "'JetBrains Mono', monospace" }}>
+                          <div style={{ flex: 1 }}>
                             <div
                               style={{
-                                fontSize: 10,
-                                fontWeight: 800,
-                                color: spermTheme.textTertiary,
-                                marginBottom: 4,
-                                letterSpacing: 1.5
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                marginBottom: 2,
+                                flexWrap: "wrap",
                               }}
                             >
-                              SPRM_PRIMARY
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 900,
+                                  color: "rgba(245,245,242,0.92)",
+                                  letterSpacing: 0.5,
+                                }}
+                              >
+                                INSTA WALLET
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: 7,
+                                  background: session.isActive
+                                    ? "rgba(232,65,66,0.14)"
+                                    : "rgba(245,245,242,0.08)",
+                                  border: "1px solid rgba(245,245,242,0.14)",
+                                  borderRadius: 3,
+                                  padding: "1px 5px",
+                                  color: "rgba(255,120,121,0.92)",
+                                  letterSpacing: 0.6,
+                                }}
+                              >
+                                {session.isActive ? "LIVE" : "OFF"}
+                              </div>
                             </div>
                             <div
                               style={{
                                 fontSize: 24,
-                                color: "#F5F5F2",
+                                color: spermTheme.accent,
                                 fontWeight: 900,
                                 lineHeight: 1,
+                                fontFamily: "'JetBrains Mono', monospace"
                               }}
                             >
-                              {balance !== null ? balance.toFixed(4) : "0.0000"}
+                              {session.isActive
+                                ? (session.sessionSprmBalance?.toFixed(4) ??
+                                  "0.0000")
+                                : "0.0000"}
                             </div>
-                          </div>
-                          {session.activeWallet === "primary" && (
-                            <div
-                              style={{
-                                fontSize: 9,
-                                background: "rgba(197,140,255,0.18)",
-                                border: "1px solid rgba(197,140,255,0.48)",
-                                borderRadius: 4,
-                                padding: "2px 6px",
-                                color: "#C58CFF",
-                                fontWeight: 800,
-                                letterSpacing: 0.5,
-                              }}
-                            >
-                              ACTIVE
-                            </div>
-                          )}
-                        </button>
-
-                        {/* ── INSTA WALLET (live) ── */}
-                        <div
-                          style={{
-                            background:
-                              session.activeWallet === "instant"
-                                ? "rgba(197,140,255,0.14)"
-                                : "rgba(245,245,242,0.04)",
-                            border: `1px solid ${session.activeWallet === "instant" && session.isActive ? "rgba(197,140,255,0.52)" : "rgba(245,245,242,0.14)"}`,
-                            borderRadius: 10,
-                            overflow: "hidden",
-                            transition: "all 0.15s",
-                          }}
-                        >
-                          {/* Header row (clickable when session is active) */}
-                          <div
-                            onClick={() => {
-                              if (session.isActive)
-                                session.setActiveWallet("instant");
-                            }}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 10,
-                              padding: "9px 10px",
-                              borderBottom: session.isActive
-                                ? "1px solid rgba(245,245,242,0.14)"
-                                : "none",
-                              cursor: session.isActive ? "pointer" : "default",
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: 9,
-                                background: `linear-gradient(135deg, ${av1}, ${av2})`,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                fontSize: 18,
-                                flexShrink: 0,
-                              }}
-                            >
-                              👛
-                            </div>
-                            <div style={{ flex: 1 }}>
+                            {session.isActive && (
                               <div
                                 style={{
                                   display: "flex",
                                   alignItems: "center",
                                   gap: 6,
-                                  marginBottom: 2,
-                                  flexWrap: "wrap",
+                                  marginTop: 3,
                                 }}
                               >
-                                <div
+                                <span
                                   style={{
-                                    fontSize: 11,
-                                    fontWeight: 900,
-                                    color: "rgba(245,245,242,0.92)",
-                                    letterSpacing: 0.5,
+                                    fontSize: 10,
+                                    color: "rgba(245,245,242,0.62)",
+                                    fontFamily: "monospace",
                                   }}
                                 >
-                                  INSTA WALLET
-                                </div>
-                                <div
-                                  style={{
-                                    fontSize: 7,
-                                    background: session.isActive
-                                      ? "rgba(197,140,255,0.18)"
-                                      : "rgba(245,245,242,0.08)",
-                                    border: "1px solid rgba(245,245,242,0.14)",
-                                    borderRadius: 3,
-                                    padding: "1px 5px",
-                                    color: "rgba(197,140,255,0.92)",
-                                    letterSpacing: 0.6,
-                                  }}
-                                >
-                                  {session.isActive ? "LIVE" : "OFF"}
-                                </div>
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: 24,
-                                  color: spermTheme.accent,
-                                  fontWeight: 900,
-                                  lineHeight: 1,
-                                  fontFamily: "'JetBrains Mono', monospace"
-                                }}
-                              >
-                                {session.isActive
-                                  ? (session.sessionSprmBalance?.toFixed(4) ??
-                                    "0.0000")
-                                  : "0.0000"}
-                              </div>
-                              {session.isActive && (
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 6,
-                                    marginTop: 3,
-                                  }}
-                                >
-                                  <span
-                                    style={{
-                                      fontSize: 10,
-                                      color: "rgba(245,245,242,0.62)",
-                                      fontFamily: "monospace",
-                                    }}
-                                  >
-                                    {session.sessionAddress
-                                      ? `${session.sessionAddress.slice(0, 6)}…${session.sessionAddress.slice(-4)}`
-                                      : ""}
-                                  </span>
-                                  <span
-                                    style={{
-                                      fontSize: 9,
-                                      color: "rgba(245,245,242,0.46)",
-                                    }}
-                                  >
-                                    (needs AVAX for gas)
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                            {session.isActive &&
-                              session.activeWallet === "instant" && (
-                                <div
+                                  {session.sessionAddress
+                                    ? `${session.sessionAddress.slice(0, 6)}…${session.sessionAddress.slice(-4)}`
+                                    : ""}
+                                </span>
+                                <span
                                   style={{
                                     fontSize: 9,
-                                    background: "rgba(197,140,255,0.18)",
-                                    border: "1px solid rgba(197,140,255,0.52)",
-                                    borderRadius: 4,
-                                    padding: "2px 6px",
-                                    color: "#C58CFF",
-                                    fontWeight: 800,
-                                    letterSpacing: 0.5,
+                                    color: "rgba(245,245,242,0.46)",
                                   }}
                                 >
-                                  ACTIVE
-                                </div>
-                              )}
+                                  (needs AVAX for gas)
+                                </span>
+                              </div>
+                            )}
                           </div>
+                          {session.isActive &&
+                            session.activeWallet === "instant" && (
+                              <div
+                                style={{
+                                  fontSize: 9,
+                                  background: "rgba(232,65,66,0.14)",
+                                  border: "1px solid rgba(232,65,66,0.45)",
+                                  borderRadius: 4,
+                                  padding: "2px 6px",
+                                  color: "#C58CFF",
+                                  fontWeight: 800,
+                                  letterSpacing: 0.5,
+                                }}
+                              >
+                                ACTIVE
+                              </div>
+                            )}
+                        </div>
 
-                          {/* ── No session → CREATE button ── */}
-                          {!session.isActive && (
+                        {/* ── No session → CREATE button ── */}
+                        {!session.isActive && (
+                          <div
+                            style={{
+                              padding: "9px 10px",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 8,
+                            }}
+                          >
                             <div
                               style={{
-                                padding: "9px 10px",
+                                fontSize: 10,
+                                color: "rgba(245,245,242,0.66)",
+                                lineHeight: 1.45,
+                              }}
+                            >
+                              Fund once, bet silently without MetaMask popup on
+                              every bet. Session wallet needs a small AVAX balance for gas.
+                            </div>
+                            <button
+                              onClick={() => {
+                                session.createSession();
+                                session.setActiveWallet("instant");
+                              }}
+                              style={{
+                                width: "100%",
+                                padding: "8px 0",
+                                background: "rgba(232,65,66,0.10)",
+                                border: "1px solid rgba(232,65,66,0.45)",
+                                borderRadius: 8,
+                                color: "#C58CFF",
+                                cursor: "pointer",
+                                fontSize: 12,
+                                fontWeight: 800,
+                                fontFamily: "inherit",
+                              }}
+                            >
+                              ⚡ CREATE SESSION
+                            </button>
+                          </div>
+                        )}
+
+                        {/* ── Active session panel ── */}
+                        {session.isActive && (
+                          <div
+                            style={{
+                              padding: "9px 10px",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 8,
+                            }}
+                          >
+                            {/* Address */}
+                            <div
+                              style={{
+                                fontSize: 9,
+                                color: "rgba(245,245,242,0.62)",
+                                fontFamily: "monospace",
+                                letterSpacing: 0.5,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {session.sessionAddress?.slice(0, 10)}…
+                              {session.sessionAddress?.slice(-8)}
+                            </div>
+
+                            {/* Deposit form */}
+                            <div
+                              style={{
                                 display: "flex",
                                 flexDirection: "column",
-                                gap: 8,
+                                gap: 6,
                               }}
                             >
                               <div
                                 style={{
-                                  fontSize: 10,
-                                  color: "rgba(245,245,242,0.66)",
-                                  lineHeight: 1.45,
+                                  fontSize: 9,
+                                  color: "rgba(245,245,242,0.72)",
+                                  letterSpacing: 1,
+                                  fontWeight: 800,
                                 }}
                               >
-                                Fund once, bet silently without MetaMask popup on
-                                every bet. Session wallet needs a small AVAX balance for gas.
+                                DEPOSIT SPRM (one MetaMask approval)
                               </div>
-                              <button
-                                onClick={() => {
-                                  session.createSession();
-                                  session.setActiveWallet("instant");
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={sessionDepositSprm}
+                                onChange={(e) =>
+                                  setSessionDepositSprm(e.target.value)
+                                }
+                                placeholder="Amount (SPRM)"
+                                style={{
+                                  width: "100%",
+                                  background: "rgba(245,245,242,0.06)",
+                                  border: "1px solid rgba(245,245,242,0.16)",
+                                  borderRadius: 6,
+                                  padding: "7px 10px",
+                                  color: "#F5F5F2",
+                                  fontSize: 14,
+                                  fontWeight: 800,
+                                  fontFamily: "inherit",
+                                  outline: "none",
+                                  boxSizing: "border-box",
                                 }}
+                              />
+                              <button
+                                disabled={session.depositStatus === "pending"}
+                                onClick={() =>
+                                  session.deposit(
+                                    parseFloat(sessionDepositSprm) || 0,
+                                  )
+                                }
                                 style={{
                                   width: "100%",
                                   padding: "8px 0",
-                                  background: "rgba(197,140,255,0.14)",
-                                  border: "1px solid rgba(197,140,255,0.52)",
-                                  borderRadius: 8,
-                                  color: "#C58CFF",
-                                  cursor: "pointer",
-                                  fontSize: 12,
+                                  background:
+                                    session.depositStatus === "done"
+                                      ? "rgba(232,65,66,0.18)"
+                                      : session.depositStatus === "error"
+                                        ? "rgba(227,150,170,0.18)"
+                                        : "rgba(245,245,242,0.14)",
+                                  border: `1px solid ${session.depositStatus === "done" ? "rgba(232,65,66,0.75)" : session.depositStatus === "error" ? "#E396AA" : "rgba(245,245,242,0.34)"}`,
+                                  borderRadius: 7,
+                                  color:
+                                    session.depositStatus === "done"
+                                      ? "#C58CFF"
+                                      : session.depositStatus === "error"
+                                        ? "#E396AA"
+                                        : "#F5F5F2",
+                                  cursor:
+                                    session.depositStatus === "pending"
+                                      ? "wait"
+                                      : "pointer",
+                                  fontSize: 13,
+                                  fontWeight: 900,
+                                  fontFamily: "inherit",
+                                }}
+                              >
+                                {session.depositStatus === "pending"
+                                  ? "⏳ FUNDING…"
+                                  : session.depositStatus === "done"
+                                    ? "✓ FUNDED"
+                                    : session.depositStatus === "error"
+                                      ? `✗ ${session.depositError}`
+                                      : "⚡ FUND SESSION"}
+                              </button>
+                            </div>
+
+                            {/* Withdraw + Destroy */}
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button
+                                disabled={
+                                  session.withdrawStatus === "pending"
+                                }
+                                onClick={() => session.withdrawAll()}
+                                style={{
+                                  flex: 1,
+                                  padding: "7px 0",
+                                  background:
+                                    session.withdrawStatus === "done"
+                                      ? "rgba(232,65,66,0.14)"
+                                      : "rgba(245,245,242,0.10)",
+                                  border: `1px solid ${session.withdrawStatus === "done" ? "rgba(232,65,66,0.75)" : session.withdrawStatus === "error" ? "#E396AA" : "rgba(245,245,242,0.28)"}`,
+                                  borderRadius: 7,
+                                  color:
+                                    session.withdrawStatus === "done"
+                                      ? "#C58CFF"
+                                      : session.withdrawStatus === "error"
+                                        ? "#E396AA"
+                                        : "#F5F5F2",
+                                  cursor:
+                                    session.withdrawStatus === "pending"
+                                      ? "wait"
+                                      : "pointer",
+                                  fontSize: 11,
                                   fontWeight: 800,
                                   fontFamily: "inherit",
                                 }}
                               >
-                                ⚡ CREATE SESSION
+                                {session.withdrawStatus === "pending"
+                                  ? "⏳…"
+                                  : session.withdrawStatus === "done"
+                                    ? "✓ DONE"
+                                    : session.withdrawStatus === "error"
+                                      ? "✗ FAILED"
+                                      : "↩ WITHDRAW ALL"}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  session.destroySession();
+                                  setWalletOpen(false);
+                                }}
+                                style={{
+                                  padding: "7px 10px",
+                                  background: "rgba(227,150,170,0.12)",
+                                  border: "1px solid rgba(227,150,170,0.45)",
+                                  borderRadius: 7,
+                                  color: spermTheme.error,
+                                  cursor: "pointer",
+                                  fontSize: 11,
+                                  fontWeight: 800,
+                                  fontFamily: "inherit",
+                                }}
+                                title="Delete session keypair from localStorage"
+                              >
+                                🗑 DESTROY
                               </button>
                             </div>
-                          )}
 
-                          {/* ── Active session panel ── */}
-                          {session.isActive && (
-                            <div
-                              style={{
-                                padding: "9px 10px",
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 8,
-                              }}
-                            >
-                              {/* Address */}
-                              <div
-                                style={{
-                                  fontSize: 9,
-                                  color: "rgba(245,245,242,0.62)",
-                                  fontFamily: "monospace",
-                                  letterSpacing: 0.5,
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                {session.sessionAddress?.slice(0, 10)}…
-                                {session.sessionAddress?.slice(-8)}
+                            {session.withdrawError && (
+                              <div style={{ fontSize: 10, color: "#E396AA" }}>
+                                {session.withdrawError}
                               </div>
-
-                              {/* Deposit form */}
-                              <div
-                                style={{
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  gap: 6,
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    fontSize: 9,
-                                    color: "rgba(245,245,242,0.72)",
-                                    letterSpacing: 1,
-                                    fontWeight: 800,
-                                  }}
-                                >
-                                  DEPOSIT SPRM (one MetaMask approval)
-                                </div>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  value={sessionDepositSprm}
-                                  onChange={(e) =>
-                                    setSessionDepositSprm(e.target.value)
-                                  }
-                                  placeholder="Amount (SPRM)"
-                                  style={{
-                                    width: "100%",
-                                    background: "rgba(245,245,242,0.06)",
-                                    border: "1px solid rgba(245,245,242,0.16)",
-                                    borderRadius: 6,
-                                    padding: "7px 10px",
-                                    color: "#F5F5F2",
-                                    fontSize: 14,
-                                    fontWeight: 800,
-                                    fontFamily: "inherit",
-                                    outline: "none",
-                                    boxSizing: "border-box",
-                                  }}
-                                />
-                                <button
-                                  disabled={session.depositStatus === "pending"}
-                                  onClick={() =>
-                                    session.deposit(
-                                      parseFloat(sessionDepositSprm) || 0,
-                                    )
-                                  }
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 0",
-                                    background:
-                                      session.depositStatus === "done"
-                                        ? "rgba(197,140,255,0.24)"
-                                        : session.depositStatus === "error"
-                                          ? "rgba(227,150,170,0.18)"
-                                          : "rgba(245,245,242,0.14)",
-                                    border: `1px solid ${session.depositStatus === "done" ? "rgba(197,140,255,0.86)" : session.depositStatus === "error" ? "#E396AA" : "rgba(245,245,242,0.34)"}`,
-                                    borderRadius: 7,
-                                    color:
-                                      session.depositStatus === "done"
-                                        ? "#C58CFF"
-                                        : session.depositStatus === "error"
-                                          ? "#E396AA"
-                                          : "#F5F5F2",
-                                    cursor:
-                                      session.depositStatus === "pending"
-                                        ? "wait"
-                                        : "pointer",
-                                    fontSize: 13,
-                                    fontWeight: 900,
-                                    fontFamily: "inherit",
-                                  }}
-                                >
-                                  {session.depositStatus === "pending"
-                                    ? "⏳ FUNDING…"
-                                    : session.depositStatus === "done"
-                                      ? "✓ FUNDED"
-                                      : session.depositStatus === "error"
-                                        ? `✗ ${session.depositError}`
-                                        : "⚡ FUND SESSION"}
-                                </button>
-                              </div>
-
-                              {/* Withdraw + Destroy */}
-                              <div style={{ display: "flex", gap: 6 }}>
-                                <button
-                                  disabled={
-                                    session.withdrawStatus === "pending"
-                                  }
-                                  onClick={() => session.withdrawAll()}
-                                  style={{
-                                    flex: 1,
-                                    padding: "7px 0",
-                                    background:
-                                      session.withdrawStatus === "done"
-                                        ? "rgba(197,140,255,0.18)"
-                                        : "rgba(245,245,242,0.10)",
-                                    border: `1px solid ${session.withdrawStatus === "done" ? "rgba(197,140,255,0.86)" : session.withdrawStatus === "error" ? "#E396AA" : "rgba(245,245,242,0.28)"}`,
-                                    borderRadius: 7,
-                                    color:
-                                      session.withdrawStatus === "done"
-                                        ? "#C58CFF"
-                                        : session.withdrawStatus === "error"
-                                          ? "#E396AA"
-                                          : "#F5F5F2",
-                                    cursor:
-                                      session.withdrawStatus === "pending"
-                                        ? "wait"
-                                        : "pointer",
-                                    fontSize: 11,
-                                    fontWeight: 800,
-                                    fontFamily: "inherit",
-                                  }}
-                                >
-                                  {session.withdrawStatus === "pending"
-                                    ? "⏳…"
-                                    : session.withdrawStatus === "done"
-                                      ? "✓ DONE"
-                                      : session.withdrawStatus === "error"
-                                        ? "✗ FAILED"
-                                        : "↩ WITHDRAW ALL"}
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    session.destroySession();
-                                    setWalletOpen(false);
-                                  }}
-                                  style={{
-                                    padding: "7px 10px",
-                                    background: "rgba(227,150,170,0.12)",
-                                    border: "1px solid rgba(227,150,170,0.45)",
-                                    borderRadius: 7,
-                                    color: spermTheme.error,
-                                    cursor: "pointer",
-                                    fontSize: 11,
-                                    fontWeight: 800,
-                                    fontFamily: "inherit",
-                                  }}
-                                  title="Delete session keypair from localStorage"
-                                >
-                                  🗑 DESTROY
-                                </button>
-                              </div>
-
-                              {session.withdrawError && (
-                                <div style={{ fontSize: 10, color: "#E396AA" }}>
-                                  {session.withdrawError}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 9,
-                            color: "rgba(245,245,242,0.52)",
-                            textAlign: "center",
-                            marginTop: 1,
-                          }}
-                        >
-                          All bets settled in SPRM
-                        </div>
-
-                        {(balance === null || balance < 2) && (
-                          <button
-                            onClick={() => {
-                              window.dispatchEvent(
-                                new CustomEvent("sprmfun:faucet"),
-                              );
-                              setWalletOpen(false);
-                            }}
-                            style={{
-                              width: "100%",
-                              padding: "9px 0",
-                              background: "rgba(197,140,255,0.14)",
-                              border: "1px solid rgba(197,140,255,0.48)",
-                              borderRadius: 9,
-                              color: "#C58CFF",
-                              cursor: "pointer",
-                              fontSize: 12,
-                              fontWeight: 800,
-                              fontFamily: "inherit",
-                            }}
-                          >
-                            + GET TOKENS
-                          </button>
+                            )}
+                          </div>
                         )}
-
-                        <button
-                          onClick={() => goToProfileTab("transfer")}
-                          style={{
-                            width: "100%",
-                            padding: "10px 0",
-                            background: "rgba(245,245,242,0.06)",
-                            border: "1px solid rgba(245,245,242,0.14)",
-                            borderRadius: 10,
-                            color: "#F5F5F2",
-                            cursor: "pointer",
-                            fontSize: 14,
-                            fontWeight: 700,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            gap: 7,
-                            fontFamily: "inherit",
-                          }}
-                        >
-                          ⇄ Transfer Funds
-                        </button>
-                        <button
-                          disabled
-                          title="Coming Soon"
-                          style={{
-                            width: "100%",
-                            padding: "10px 0",
-                            background: "rgba(245,245,242,0.04)",
-                            border: "1px solid rgba(245,245,242,0.12)",
-                            borderRadius: 10,
-                            color: "rgba(245,245,242,0.46)",
-                            cursor: "not-allowed",
-                            fontSize: 13,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            gap: 7,
-                            fontFamily: "inherit",
-                          }}
-                        >
-                          ⚙ Manage Wallet (Coming Soon)
-                        </button>
                       </div>
+                      <div
+                        style={{
+                          fontSize: 9,
+                          color: "rgba(245,245,242,0.52)",
+                          textAlign: "center",
+                          marginTop: 1,
+                        }}
+                      >
+                        All bets settled in SPRM
+                      </div>
+
+                      {(balance === null || balance < 2) && (
+                        <button
+                          onClick={() => {
+                            window.dispatchEvent(
+                              new CustomEvent("sprmfun:faucet"),
+                            );
+                            setWalletOpen(false);
+                          }}
+                          style={{
+                            width: "100%",
+                            padding: "9px 0",
+                            background: "rgba(232,65,66,0.10)",
+                            border: "1px solid rgba(232,65,66,0.42)",
+                            borderRadius: 9,
+                            color: "#C58CFF",
+                            cursor: "pointer",
+                            fontSize: 12,
+                            fontWeight: 800,
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          + GET TOKENS
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => goToProfileTab("transfer")}
+                        style={{
+                          width: "100%",
+                          padding: "10px 0",
+                          background: "rgba(245,245,242,0.06)",
+                          border: "1px solid rgba(245,245,242,0.14)",
+                          borderRadius: 10,
+                          color: "#F5F5F2",
+                          cursor: "pointer",
+                          fontSize: 14,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 7,
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        ⇄ Transfer Funds
+                      </button>
+                      <button
+                        disabled
+                        title="Coming Soon"
+                        style={{
+                          width: "100%",
+                          padding: "10px 0",
+                          background: "rgba(245,245,242,0.04)",
+                          border: "1px solid rgba(245,245,242,0.12)",
+                          borderRadius: 10,
+                          color: "rgba(245,245,242,0.46)",
+                          cursor: "not-allowed",
+                          fontSize: 13,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 7,
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        ⚙ Manage Wallet (Coming Soon)
+                      </button>
                     </div>
-                  )}
-                </div>
-              );
-            })()}
-          {/* Mute */}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        {/* Mute */}
+        <button
+          onClick={() => {
+            setMuted((m) => !m);
+            if (audioRef.current && audioRef.current.paused)
+              audioRef.current.play().catch(() => { });
+          }}
+          style={{
+            background: spermTheme.bgCard,
+            border: `1px solid ${spermTheme.borderChrome}`,
+            borderRadius: 6,
+            height: btnSize,
+            width: btnSize,
+            cursor: "pointer",
+            color: spermTheme.textSecondary,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+          title={muted ? "Unmute" : "Mute"}
+        >
+          {muted ? (
+            <VolumeX size={14} />
+          ) : (
+            <Volume2 size={14} />
+          )}
+        </button>
+
+        {/* Bell — hidden on small screens */}
+        {!isTiny && (
           <button
-            onClick={() => {
-              setMuted((m) => !m);
-              if (audioRef.current && audioRef.current.paused)
-                audioRef.current.play().catch(() => { });
-            }}
             style={{
               background: spermTheme.bgCard,
               border: `1px solid ${spermTheme.borderChrome}`,
@@ -996,398 +1155,373 @@ export default function TopHeader() {
               alignItems: "center",
               justifyContent: "center",
               flexShrink: 0,
+              position: "relative",
             }}
-            title={muted ? "Unmute" : "Mute"}
           >
-            {muted ? (
-              <VolumeX size={14} />
-            ) : (
-              <Volume2 size={14} />
-            )}
-          </button>
-
-          {/* Bell — hidden on small screens */}
-          {!isTiny && (
-            <button
+            <Bell size={14} />
+            <div
               style={{
-                background: spermTheme.bgCard,
-                border: `1px solid ${spermTheme.borderChrome}`,
-                borderRadius: 6,
-                height: btnSize,
-                width: btnSize,
-                cursor: "pointer",
-                color: spermTheme.textSecondary,
+                position: "absolute",
+                top: 6,
+                right: 6,
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: spermTheme.accent,
+                border: `1.5px solid ${spermTheme.bgPanel}`,
+              }}
+            />
+          </button>
+        )}
+
+        {/* Profile avatar + dropdown — real connect button when disconnected */}
+        {connected ? (
+          <div ref={profileRef} style={{ position: "relative" }}>
+            <button
+              onClick={() => setProfileOpen((o) => !o)}
+              style={{
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-                position: "relative",
+                gap: 6,
+                background: profileOpen ? spermTheme.accentSoft : spermTheme.bgCard,
+                border: `1px solid ${profileOpen ? spermTheme.accentBorder : spermTheme.borderChrome}`,
+                borderRadius: 7,
+                padding: "0 8px 0 4px",
+                height: btnSize,
+                cursor: "pointer",
+                color: "#fff",
+                fontFamily: "inherit",
+                transition: "all 0.15s",
               }}
             >
-              <Bell size={14} />
+              {/* Avatar */}
               <div
                 style={{
-                  position: "absolute",
-                  top: 6,
-                  right: 6,
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: spermTheme.accent,
-                  border: `1.5px solid ${spermTheme.bgPanel}`,
+                  width: isTiny ? 22 : 24,
+                  height: isTiny ? 22 : 24,
+                  borderRadius: 5,
+                  flexShrink: 0,
+                  background: `linear-gradient(135deg, ${av1}, ${av2})`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 10,
+                  fontWeight: 800,
+                  color: "rgba(10,7,18,0.7)",
+                }}
+              >
+                {initials}
+              </div>
+              <ChevronDown
+                size={12}
+                style={{
+                  color: spermTheme.textSecondary,
+                  transform: profileOpen ? "rotate(180deg)" : "none",
+                  transition: "transform 0.15s",
                 }}
               />
             </button>
-          )}
 
-          {/* Profile avatar + dropdown — real connect button when disconnected */}
-          {connected ? (
-            <div ref={profileRef} style={{ position: "relative" }}>
-              <button
-                onClick={() => setProfileOpen((o) => !o)}
+            {profileOpen && (
+              <div
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  background: profileOpen ? spermTheme.accentSoft : spermTheme.bgCard,
-                  border: `1px solid ${profileOpen ? spermTheme.accentBorder : spermTheme.borderChrome}`,
-                  borderRadius: 7,
-                  padding: "0 8px 0 4px",
-                  height: btnSize,
-                  cursor: "pointer",
-                  color: "#fff",
-                  fontFamily: "inherit",
-                  transition: "all 0.15s",
+                  position: "absolute",
+                  top: "calc(100% + 10px)",
+                  right: 0,
+                  width: 284,
+                  borderRadius: 8,
+                  border: `1px solid ${spermTheme.borderChrome}`,
+                  background: 'rgba(0,0,0,0.85)',
+                  backdropFilter: "blur(32px)",
+                  WebkitBackdropFilter: "blur(32px)",
+                  boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+                  zIndex: 450,
                 }}
               >
-                {/* Avatar */}
                 <div
                   style={{
-                    width: isTiny ? 22 : 24,
-                    height: isTiny ? 22 : 24,
-                    borderRadius: 5,
-                    flexShrink: 0,
-                    background: `linear-gradient(135deg, ${av1}, ${av2})`,
+                    borderRadius: 15,
+                    padding: "11px 11px 10px",
                     display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 10,
-                    fontWeight: 800,
-                    color: "rgba(10,7,18,0.7)",
+                    flexDirection: "column",
+                    gap: 8,
                   }}
                 >
-                  {initials}
-                </div>
-                <ChevronDown
-                  size={12}
-                  style={{
-                    color: spermTheme.textSecondary,
-                    transform: profileOpen ? "rotate(180deg)" : "none",
-                    transition: "transform 0.15s",
-                  }}
-                />
-              </button>
-
-              {profileOpen && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 10px)",
-                    right: 0,
-                    width: 284,
-                    borderRadius: 8,
-                    border: `1px solid ${spermTheme.borderChrome}`,
-                    background: 'rgba(0,0,0,0.85)',
-                    backdropFilter: "blur(32px)",
-                    WebkitBackdropFilter: "blur(32px)",
-                    boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
-                    zIndex: 450,
-                  }}
-                >
+                  {/* Avatar + address */}
                   <div
                     style={{
-                      borderRadius: 15,
-                      padding: "11px 11px 10px",
                       display: "flex",
-                      flexDirection: "column",
-                      gap: 8,
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "3px 2px 10px",
+                      borderBottom: "1px solid rgba(245,245,242,0.14)",
                     }}
                   >
-                    {/* Avatar + address */}
                     <div
                       style={{
+                        width: 38,
+                        height: 38,
+                        borderRadius: 10,
+                        background: `linear-gradient(135deg, ${av1}, ${av2})`,
                         display: "flex",
                         alignItems: "center",
-                        gap: 10,
-                        padding: "3px 2px 10px",
-                        borderBottom: "1px solid rgba(245,245,242,0.14)",
+                        justifyContent: "center",
+                        fontSize: 15,
+                        fontWeight: 800,
+                        color: "rgba(10,7,18,0.62)",
+                        flexShrink: 0,
+                        boxShadow: "0 8px 22px rgba(0,0,0,0.28)",
                       }}
                     >
+                      {initials}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
                       <div
                         style={{
-                          width: 38,
-                          height: 38,
-                          borderRadius: 10,
-                          background: `linear-gradient(135deg, ${av1}, ${av2})`,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 15,
+                          fontSize: 13,
                           fontWeight: 800,
-                          color: "rgba(10,7,18,0.62)",
-                          flexShrink: 0,
-                          boxShadow: "0 8px 22px rgba(0,0,0,0.28)",
+                          color: "rgba(245,245,242,0.92)",
+                          marginBottom: 2,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
                         }}
                       >
-                        {initials}
+                        {username || "Connecting…"}
                       </div>
-                      <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 800,
-                            color: "rgba(245,245,242,0.92)",
-                            marginBottom: 2,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {username || "Connecting…"}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 10,
-                            color: "rgba(245,245,242,0.62)",
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          {shortAddr}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 3,
-                      }}
-                    >
-                      {profileMenuItems.map((item) => {
-                        const Icon = item.icon;
-                        return (
-                          <button
-                            key={item.label}
-                            onClick={() => goToProfileTab(item.tab)}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 10,
-                              background: "transparent",
-                              border: "none",
-                              borderRadius: 8,
-                              padding: "8px 8px",
-                              color: "rgba(245,245,242,0.82)",
-                              cursor: "pointer",
-                              fontSize: 15,
-                              fontFamily: "inherit",
-                              textAlign: "left",
-                              transition: "background 0.12s",
-                            }}
-                          >
-                            <Icon
-                              size={14}
-                              style={{
-                                color: "rgba(197,140,255,0.94)",
-                                flexShrink: 0,
-                              }}
-                            />
-                            <span>{item.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div
-                      style={{
-                        height: 1,
-                        background: "rgba(245,245,242,0.14)",
-                      }}
-                    />
-
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 3,
-                      }}
-                    >
-                      {disabledMenuItems.map((item) => {
-                        const Icon = item.icon;
-                        return (
-                          <button
-                            key={item.label}
-                            disabled
-                            title="Coming Soon"
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 10,
-                              background: "transparent",
-                              border: "none",
-                              borderRadius: 8,
-                              padding: "8px 8px",
-                              color: "rgba(245,245,242,0.52)",
-                              cursor: "not-allowed",
-                              fontSize: 15,
-                              fontFamily: "inherit",
-                              textAlign: "left",
-                            }}
-                          >
-                            <Icon
-                              size={14}
-                              style={{
-                                color: "rgba(245,245,242,0.44)",
-                                flexShrink: 0,
-                              }}
-                            />
-                            <span>{item.label} (Coming Soon)</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div
-                      style={{
-                        height: 1,
-                        background: "rgba(245,245,242,0.14)",
-                      }}
-                    />
-
-                    <button
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        background: "transparent",
-                        border: "none",
-                        borderRadius: 8,
-                        padding: "8px 8px",
-                        color: "rgba(227,150,170,0.86)",
-                        cursor: "pointer",
-                        fontSize: 15,
-                        fontFamily: "inherit",
-                        textAlign: "left",
-                      }}
-                      onClick={() => {
-                        disconnect();
-                        setProfileOpen(false);
-                      }}
-                    >
-                      <LogOut
-                        size={14}
+                      <div
                         style={{
-                          color: "rgba(227,150,170,0.86)",
-                          flexShrink: 0,
+                          fontSize: 10,
+                          color: "rgba(245,245,242,0.62)",
+                          fontFamily: "monospace",
                         }}
-                      />
-                      <span>DISCONNECT_SYSTEM</span>
-                    </button>
+                      >
+                        {shortAddr}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            /* Connect Wallet button for EVM (handled by RainbowKit) */
-            <ConnectButton.Custom>
-              {({
-                account,
-                chain,
-                openAccountModal,
-                openChainModal,
-                openConnectModal,
-                authenticationStatus,
-                mounted,
-              }) => {
-                const ready = mounted && authenticationStatus !== 'loading';
-                const hasConnected =
-                  ready &&
-                  account &&
-                  chain &&
-                  (!authenticationStatus ||
-                    authenticationStatus === 'authenticated');
-                return (
+
                   <div
-                    {...(!ready && {
-                      'aria-hidden': true,
-                      style: {
-                        opacity: 0,
-                        pointerEvents: 'none',
-                        userSelect: 'none',
-                      },
-                    })}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 3,
+                    }}
                   >
-                    {(() => {
-                      if (!hasConnected) {
-                        return (
-                          <button
-                            onClick={openConnectModal}
-                            type="button"
-                            style={{
-                              background: `linear-gradient(135deg, ${spermTheme.accent}, ${spermTheme.accentBright})`,
-                              border: "none",
-                              borderRadius: 7,
-                              fontSize: 12,
-                              height: btnSize,
-                              padding: isTiny ? "0 10px" : "0 16px",
-                              fontFamily: "inherit",
-                              color: "#fff",
-                              cursor: "pointer",
-                              fontWeight: 600,
-                              whiteSpace: "nowrap",
-                              boxShadow: `0 4px 14px ${spermTheme.accentGlow}`,
-                            }}
-                          >
-                            Connect Wallet
-                          </button>
-                        );
-                      }
-                      if (chain.unsupported) {
-                        return (
-                          <button
-                            onClick={openChainModal}
-                            type="button"
-                            style={{
-                              background: 'rgba(227,150,170,0.12)',
-                              border: '1px solid rgba(227,150,170,0.45)',
-                              borderRadius: isTiny ? 8 : 10,
-                              fontSize: isTiny ? 10 : 12,
-                              height: btnSize,
-                              padding: isTiny ? "0 8px" : "0 16px",
-                              fontFamily: "inherit",
-                              color: spermTheme.error,
-                              cursor: "pointer",
-                              fontWeight: 700,
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            Wrong Network
-                          </button>
-                        );
-                      }
+                    {profileMenuItems.map((item) => {
+                      const Icon = item.icon;
                       return (
-                        <div style={{ display: 'flex', gap: 12 }}>
-                          {/* Add native balance here if desired in the future */}
-                        </div>
+                        <button
+                          key={item.label}
+                          onClick={() => goToProfileTab(item.tab)}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            background: "transparent",
+                            border: "none",
+                            borderRadius: 8,
+                            padding: "8px 8px",
+                            color: "rgba(245,245,242,0.82)",
+                            cursor: "pointer",
+                            fontSize: 15,
+                            fontFamily: "inherit",
+                            textAlign: "left",
+                            transition: "background 0.12s",
+                          }}
+                        >
+                          <Icon
+                            size={14}
+                            style={{
+                              color: "rgba(255,120,121,0.94)",
+                              flexShrink: 0,
+                            }}
+                          />
+                          <span>{item.label}</span>
+                        </button>
                       );
-                    })()}
+                    })}
                   </div>
-                );
-              }}
-            </ConnectButton.Custom>
-          )}
-        </div>
+
+                  <div
+                    style={{
+                      height: 1,
+                      background: "rgba(245,245,242,0.14)",
+                    }}
+                  />
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 3,
+                    }}
+                  >
+                    {disabledMenuItems.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <button
+                          key={item.label}
+                          disabled
+                          title="Coming Soon"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            background: "transparent",
+                            border: "none",
+                            borderRadius: 8,
+                            padding: "8px 8px",
+                            color: "rgba(245,245,242,0.52)",
+                            cursor: "not-allowed",
+                            fontSize: 15,
+                            fontFamily: "inherit",
+                            textAlign: "left",
+                          }}
+                        >
+                          <Icon
+                            size={14}
+                            style={{
+                              color: "rgba(245,245,242,0.44)",
+                              flexShrink: 0,
+                            }}
+                          />
+                          <span>{item.label} (Coming Soon)</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div
+                    style={{
+                      height: 1,
+                      background: "rgba(245,245,242,0.14)",
+                    }}
+                  />
+
+                  <button
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      background: "transparent",
+                      border: "none",
+                      borderRadius: 8,
+                      padding: "8px 8px",
+                      color: "rgba(227,150,170,0.86)",
+                      cursor: "pointer",
+                      fontSize: 15,
+                      fontFamily: "inherit",
+                      textAlign: "left",
+                    }}
+                    onClick={() => {
+                      disconnect();
+                      setProfileOpen(false);
+                    }}
+                  >
+                    <LogOut
+                      size={14}
+                      style={{
+                        color: "rgba(227,150,170,0.86)",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span>DISCONNECT_SYSTEM</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Connect Wallet button for EVM (handled by RainbowKit) */
+          <ConnectButton.Custom>
+            {({
+              account,
+              chain,
+              openAccountModal,
+              openChainModal,
+              openConnectModal,
+              authenticationStatus,
+              mounted,
+            }) => {
+              const ready = mounted && authenticationStatus !== 'loading';
+              const hasConnected =
+                ready &&
+                account &&
+                chain &&
+                (!authenticationStatus ||
+                  authenticationStatus === 'authenticated');
+              return (
+                <div
+                  {...(!ready && {
+                    'aria-hidden': true,
+                    style: {
+                      opacity: 0,
+                      pointerEvents: 'none',
+                      userSelect: 'none',
+                    },
+                  })}
+                >
+                  {(() => {
+                    if (!hasConnected) {
+                      return (
+                        <button
+                          onClick={openConnectModal}
+                          type="button"
+                          style={{
+                            background: `linear-gradient(135deg, ${spermTheme.accent}, ${spermTheme.accentBright})`,
+                            border: "none",
+                            borderRadius: 7,
+                            fontSize: 12,
+                            height: btnSize,
+                            padding: isTiny ? "0 10px" : "0 16px",
+                            fontFamily: "inherit",
+                            color: "#fff",
+                            cursor: "pointer",
+                            fontWeight: 600,
+                            whiteSpace: "nowrap",
+                            boxShadow: `0 4px 14px ${spermTheme.accentGlow}`,
+                          }}
+                        >
+                          Connect Wallet
+                        </button>
+                      );
+                    }
+                    if (chain.unsupported) {
+                      return (
+                        <button
+                          onClick={openChainModal}
+                          type="button"
+                          style={{
+                            background: 'rgba(227,150,170,0.12)',
+                            border: '1px solid rgba(227,150,170,0.45)',
+                            borderRadius: isTiny ? 8 : 10,
+                            fontSize: isTiny ? 10 : 12,
+                            height: btnSize,
+                            padding: isTiny ? "0 8px" : "0 16px",
+                            fontFamily: "inherit",
+                            color: spermTheme.error,
+                            cursor: "pointer",
+                            fontWeight: 700,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          Wrong Network
+                        </button>
+                      );
+                    }
+                    return (
+                      <div style={{ display: 'flex', gap: 12 }}>
+                        {/* Add native balance here if desired in the future */}
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            }}
+          </ConnectButton.Custom>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,99 +1,174 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
-  --bg-base: #080B14;
-  --bg-panel: #0D1120;
-  --bg-card: #111827;
-  --bg-hover: #1a2235;
-  --accent: #8B5CF6;
-  --accent-bright: #A78BFA;
-  --accent-glow: rgba(139,92,246,0.25);
-  --gold: #F59E0B;
-  --border: rgba(255,255,255,0.06);
-  --border-accent: rgba(139,92,246,0.3);
-  --text-primary: #F1F5F9;
-  --text-secondary: #94A3B8;
-  --text-muted: #475569;
+  --bg-base:    #0B0B0F;
+  --bg-panel:   #0F1319;
+  --bg-card:    #11141A;
+  --bg-hover:   #161D26;
+
+  --avax-red:        #E84142;
+  --avax-red-hover:  #FF5A5F;
+  --avax-red-soft:   rgba(232,65,66,0.10);
+  --avax-red-glow:   rgba(232,65,66,0.20);
+  --avax-red-border: rgba(232,65,66,0.30);
+
+  --secondary: #7B61FF;
+  --highlight: #3B82F6;
+
+  --text-primary:   #E6E8EB;
+  --text-secondary: #9BA3AF;
+  --text-muted:     #4B5563;
+
   --success: #10B981;
-  --error: #EF4444;
-  --radius: 8px;
+  --error:   #EF4444;
+  --gold:    #F59E0B;
+
+  --border:        rgba(255,255,255,0.06);
+  --border-strong: rgba(255,255,255,0.09);
+  --border-accent: rgba(232,65,66,0.30);
+
+  --radius-sm: 8px;
+  --radius:    12px;
+  --radius-lg: 16px;
+
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.025) inset;
+  --shadow-panel: 0 4px 24px rgba(0,0,0,0.6);
 }
 
-*,
-*::before,
-*::after {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+*, *::before, *::after {
+  margin: 0; padding: 0; box-sizing: border-box;
 }
 
-html,
-body {
-  width: 100%;
-  height: 100%;
+html, body {
+  width: 100%; height: 100%;
   background: var(--bg-base);
   overflow: hidden;
   color: var(--text-primary);
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: var(--bg-panel); }
-::-webkit-scrollbar-thumb { background: rgba(139,92,246,0.2); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(139,92,246,0.4); }
-* { scrollbar-width: thin; scrollbar-color: rgba(139,92,246,0.2) var(--bg-panel); }
+/* ── Scrollbar ──────────────────────────────────────── */
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(232,65,66,0.28); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(232,65,66,0.50); }
+* { scrollbar-width: thin; scrollbar-color: rgba(232,65,66,0.28) transparent; }
 
-/* ── Button base ── */
-button {
-  transition: all 0.15s ease;
-  font-family: 'Inter', sans-serif;
-  cursor: pointer;
-}
+/* ── Button base ────────────────────────────────────── */
+button { transition: all 0.15s ease; font-family: inherit; cursor: pointer; }
 button:active { transform: scale(0.97); }
 
-/* ── Casino card ── */
-.casino-card {
-  background: var(--bg-panel);
+/* ── Card ───────────────────────────────────────────── */
+.avax-card {
+  background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
 }
 
-/* ── Panel divider ── */
-.panel-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 0;
+/* ── Primary button — AVAX red gradient ─────────────── */
+.avax-btn-primary {
+  background: linear-gradient(135deg, #E84142, #FF5A5F);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(232,65,66,0.30);
+  transition: all 0.2s ease;
+}
+.avax-btn-primary:hover {
+  box-shadow: 0 6px 24px rgba(232,65,66,0.45);
+  transform: translateY(-1px);
 }
 
-/* ── Pulse animation for live indicator ── */
+/* ── Ghost button ───────────────────────────────────── */
+.avax-btn-ghost {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.avax-btn-ghost:hover {
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(255,255,255,0.12);
+  color: var(--text-primary);
+}
+
+/* ── Panel divider ──────────────────────────────────── */
+.panel-divider { height: 1px; background: var(--border); }
+
+/* ── Section label ──────────────────────────────────── */
+.section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── Mono numbers ───────────────────────────────────── */
+.mono { font-family: 'JetBrains Mono', monospace; }
+
+/* ── Subtle background grid texture ────────────────── */
+.bg-mesh {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.012) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.012) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* ── Animations ─────────────────────────────────────── */
 @keyframes pulse-dot {
   0%, 100% { opacity: 0.5; transform: scale(0.85); }
   50%       { opacity: 1;   transform: scale(1.15); }
 }
 
-/* ── Win flash ── */
+@keyframes avax-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232,65,66,0.4); }
+  50%       { box-shadow: 0 0 0 6px rgba(232,65,66,0); }
+}
+
 @keyframes win-flash {
   0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.5); }
   70%  { box-shadow: 0 0 0 12px rgba(16,185,129,0); }
   100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
 }
 
-/* ── Slide-in toast ── */
 @keyframes slide-up {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Subtle grain overlay ── */
+@keyframes pill-in {
+  from { opacity: 0; transform: scale(0.82) translateX(-6px); }
+  to   { opacity: 1; transform: scale(1) translateX(0); }
+}
+
+/* ── Input focus ────────────────────────────────────── */
+input:focus {
+  outline: none;
+  border-color: rgba(232,65,66,0.50) !important;
+  box-shadow: 0 0 0 2px rgba(232,65,66,0.12) !important;
+  transition: all 0.15s ease;
+}
+
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+input[type=number] { -moz-appearance: textfield; }
+
+/* ── Grain overlay ──────────────────────────────────── */
 body::before {
   content: '';
-  position: fixed;
-  inset: 0;
+  position: fixed; inset: 0;
   pointer-events: none;
   z-index: 9999;
-  opacity: 0.018;
+  opacity: 0.015;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
