@@ -277,10 +277,11 @@ const vrfPath = new Map();
 let currentAvaxPrice = 0;
 let lastPrice = 0;
 let priceBaseline = 0;
-const PRICE_CHAOS_FACTOR = 75.0;  // Halved for stability — was 142.5
-const FRICTION = 0.88;           // More damping to drain velocity faster — was 0.94
-const MOMENTUM_INERTIA = 0.10;   // Slightly reduced — was 0.114
-const MAX_SIM_VELOCITY = 0.25;   // Hard cap to prevent sudden lurches
+const PRICE_CHAOS_FACTOR = 45.0;  // Further reduced for smoothness — was 75
+const FRICTION = 0.85;           // Stronger damping — was 0.88
+const MOMENTUM_INERTIA = 0.08;   // Reduced — was 0.10
+const MAX_SIM_VELOCITY = 0.15;   // Tighter cap — was 0.25
+const EMA_ALPHA = 0.12;          // EMA smoothing for broadcast Y (lower = smoother)
 
 function initBinance() {
   const ws = new WebSocket("wss://stream.binance.com:9443/ws/avaxusdt@ticker");
@@ -316,6 +317,7 @@ function initBinance() {
 
 // ── Simulation state ────────────────────────────────────────────────────────────
 let simY = 0.0;
+let simYEma = 0.0; // EMA-smoothed Y sent to clients
 let simVelocity = 0;
 let simTime = 0;
 
@@ -1274,7 +1276,8 @@ app.prepare().then(async () => {
       steerTowardRow(vrfWinRow, curColX, serverCurrentX);
 
     const { y } = stepSim();
-    historyBuffer.push({ x: serverCurrentX, y });
+    simYEma = simYEma + EMA_ALPHA * (y - simYEma); // smooth before broadcast
+    historyBuffer.push({ x: serverCurrentX, y: simYEma });
     if (historyBuffer.length > HISTORY_SIZE) historyBuffer.shift();
 
     // tickRow must match box.row convention (row 0=bottom, row 499=top).
@@ -1338,7 +1341,7 @@ app.prepare().then(async () => {
     broadcast(
       JSON.stringify({
         type: "pointer",
-        y,
+        y: simYEma,
         currentX: serverCurrentX,
         price: currentAvaxPrice,
         timestamp: Date.now(),

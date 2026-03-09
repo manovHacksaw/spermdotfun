@@ -437,7 +437,7 @@ export default function StockGrid() {
 
     // Smoothly interpolate the Y position on every frame
     const targetY = last2.y
-    s.lerpY += (targetY - s.lerpY) * 0.04 // Smoother chase — was 0.07
+    s.lerpY += (targetY - s.lerpY) * 0.025 // Smoother chase — was 0.04
     const dotY = (s.lerpY * 30 + 250) * rowH - viewY
 
     // Direction angle from previous LERP position — with additional smoothing
@@ -449,7 +449,7 @@ export default function StockGrid() {
       if (targetAngle > s.lerpAngle) s.lerpAngle += Math.PI * 2
       else s.lerpAngle -= Math.PI * 2
     }
-    s.lerpAngle += (targetAngle - s.lerpAngle) * 0.07
+    s.lerpAngle += (targetAngle - s.lerpAngle) * 0.05
     const angle = s.lerpAngle
 
     ctx.save()
