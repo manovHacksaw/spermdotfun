@@ -214,7 +214,7 @@ export function useSessionWallet(): SessionWalletState {
       setFundError(friendlyError(err))
       setFundStatus('error')
     }
-  }, [signer, refreshAvaxBalance])
+  }, [signer, mainAddress, wrongNetwork, switchToFuji, refreshAvaxBalance])
 
   // ── topUpGas: MetaMask signer sends 0.05 AVAX to session wallet ──────────
   const topUpGas = useCallback(async () => {
@@ -292,7 +292,7 @@ export function useSessionWallet(): SessionWalletState {
       setDepositError(friendlyError(err))
       setDepositStatus('error')
     }
-  }, [sessionAddress, signer, refreshSessionBalance])
+  }, [sessionAddress, signer, wrongNetwork, refreshSessionBalance])
 
   // ── withdrawAll: session wallet calls token.transfer(mainAddress, balance) ─
   // Session wallet pays its own AVAX gas — must have AVAX from faucet.avax.network
