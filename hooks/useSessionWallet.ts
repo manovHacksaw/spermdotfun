@@ -57,6 +57,37 @@ export interface SessionWalletState {
 export function useSessionWallet(): SessionWalletState {
   const { address: mainAddress, signer, switchToFuji, wrongNetwork } = useEvmWallet()
 
+  // Resolve a signer: use wagmi signer if available, otherwise fall back to
+  // window.ethereum directly (handles cases where wagmi walletClient isn't
+  // ready yet due to chain mismatch or slow hydration).
+  const resolveSigner = useCallback(async (): Promise<ethers.JsonRpcSigner | null> => {
+    if (signer) return signer
+    const eth = typeof window !== 'undefined' && (window as any).ethereum
+    if (!eth) return null
+    try {
+      // Switch to / add Fuji if needed
+      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0xA869' }] })
+        .catch(async (e: any) => {
+          if (e.code === 4902) {
+            await eth.request({
+              method: 'wallet_addEthereumChain',
+              params: [{
+                chainId: '0xA869',
+                chainName: 'Avalanche Fuji Testnet',
+                nativeCurrency: { name: 'AVAX', symbol: 'AVAX', decimals: 18 },
+                rpcUrls: [RPC_URL],
+                blockExplorerUrls: ['https://testnet.snowtrace.io'],
+              }],
+            })
+          }
+        })
+      const provider = new ethers.BrowserProvider(eth)
+      return await provider.getSigner()
+    } catch {
+      return null
+    }
+  }, [signer])
+
   const [sessionWallet, setSessionWallet] = useState<ethers.Wallet | ethers.HDNodeWallet | null>(null)
   const [depositStatus, setDepositStatus] = useState<TxStatus>('idle')
   const [depositError, setDepositError] = useState('')
@@ -180,16 +211,9 @@ export function useSessionWallet(): SessionWalletState {
       setFundStatus('error')
       return
     }
-    if (wrongNetwork) {
-      setFundError('Switching to Avalanche Fuji…')
-      setFundStatus('pending')
-      await switchToFuji()
-      setFundError('')
-      setFundStatus('idle')
-      return
-    }
-    if (!signer) {
-      setFundError('Wallet not ready — please wait a moment and try again')
+    const activeSigner = await resolveSigner()
+    if (!activeSigner) {
+      setFundError('MetaMask not found — please install it')
       setFundStatus('error')
       return
     }
@@ -200,7 +224,7 @@ export function useSessionWallet(): SessionWalletState {
     setFundStatus('pending')
     setFundError('')
     try {
-      const tx = await signer.sendTransaction({
+      const tx = await activeSigner.sendTransaction({
         to: w.address,
         value: ethers.parseEther('0.05'),
       })
@@ -214,24 +238,25 @@ export function useSessionWallet(): SessionWalletState {
       setFundError(friendlyError(err))
       setFundStatus('error')
     }
-  }, [signer, mainAddress, wrongNetwork, switchToFuji, refreshAvaxBalance])
+  }, [mainAddress, resolveSigner, refreshAvaxBalance])
 
   // ── topUpGas: MetaMask signer sends 0.05 AVAX to session wallet ──────────
   const topUpGas = useCallback(async () => {
-    if (!signer) {
-      setFundError('Connect MetaMask first')
+    if (!sessionAddress) {
+      setFundError('No session wallet active')
       setFundStatus('error')
       return
     }
-    if (!sessionAddress) {
-      setFundError('No session wallet active')
+    const activeSigner = await resolveSigner()
+    if (!activeSigner) {
+      setFundError('MetaMask not found — please install it')
       setFundStatus('error')
       return
     }
     setFundStatus('pending')
     setFundError('')
     try {
-      const tx = await signer.sendTransaction({
+      const tx = await activeSigner.sendTransaction({
         to: sessionAddress,
         value: ethers.parseEther('0.05'),
       })
@@ -245,14 +270,14 @@ export function useSessionWallet(): SessionWalletState {
       setFundError(friendlyError(err))
       setFundStatus('error')
     }
-  }, [signer, sessionAddress, refreshAvaxBalance])
+  }, [sessionAddress, resolveSigner, refreshAvaxBalance])
 
   // ── deposit: MetaMask signer calls token.transfer(sessionAddress, amount) ─
   // Note: the session wallet needs a small amount of AVAX to pay gas for bets
   // and withdrawals. Users can obtain testnet AVAX from faucet.avax.network.
   const deposit = useCallback(async (sprmAmt: number) => {
-    if (!sessionAddress || !signer) {
-      setDepositError(wrongNetwork ? 'Switch to Avalanche Fuji first' : 'Wallet not ready — please wait a moment')
+    if (!sessionAddress) {
+      setDepositError('Start a session wallet first')
       setDepositStatus('error')
       return
     }
@@ -261,10 +286,16 @@ export function useSessionWallet(): SessionWalletState {
       setDepositStatus('error')
       return
     }
+    const activeSigner = await resolveSigner()
+    if (!activeSigner) {
+      setDepositError('MetaMask not found — please install it')
+      setDepositStatus('error')
+      return
+    }
     setDepositStatus('pending')
     setDepositError('')
     try {
-      const token = new ethers.Contract(TOKEN_ADDRESS, ERC20_ABI, signer)
+      const token = new ethers.Contract(TOKEN_ADDRESS, ERC20_ABI, activeSigner)
       const amountRaw = ethers.parseUnits(sprmAmt.toString(), 18)
       const tx = await token.transfer(sessionAddress, amountRaw)
       console.log('[SESSION] deposit tx:', tx.hash)
@@ -292,7 +323,7 @@ export function useSessionWallet(): SessionWalletState {
       setDepositError(friendlyError(err))
       setDepositStatus('error')
     }
-  }, [sessionAddress, signer, wrongNetwork, refreshSessionBalance])
+  }, [sessionAddress, resolveSigner, refreshSessionBalance])
 
   // ── withdrawAll: session wallet calls token.transfer(mainAddress, balance) ─
   // Session wallet pays its own AVAX gas — must have AVAX from faucet.avax.network
