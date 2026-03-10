@@ -15,7 +15,7 @@ flowchart TD
     E --> F{User tries to click a cell}
     F --> G["'Connect wallet to place bets'\nbanner visible at bottom"]
     G --> H[User clicks wallet button top-right]
-    H --> I[Phantom modal opens]
+    H --> I[Wallet modal opens (MetaMask/RainbowKit)]
     I --> J[User approves connection]
     J --> K[Wallet connected → GameHUD shows balance]
 ```
@@ -28,14 +28,14 @@ flowchart TD
 flowchart TD
     A([Wallet connected, balance < 2 SPRM]) --> B["'+ GET TOKENS' button visible in balance pill"]
     B --> C[User clicks GET TOKENS]
-    C --> D{SOL balance < 0.05?}
-    D -- yes --> E[POST /api/airdrop → 1 SOL airdropped]
+    C --> D{AVAX balance < 0.01?}
+    D -- yes --> E[POST /api/airdrop → 1 AVAX transferred]
     D -- no --> F[Skip airdrop]
     E --> F
-    F --> G[Build faucet tx via Anchor:\nfaucet(5 × ONE_TOKEN)]
-    G --> H[Phantom prompts user to sign]
-    H --> I[Tx sent to localnet RPC]
-    I --> J[Poll confirmationStatus every 1s\nmax 40 attempts]
+    F --> G[Build faucet tx via ethers:\nfaucet(5 × ONE_TOKEN)]
+    G --> H[Wallet prompts user to sign]
+    H --> I[Tx sent to Avalanche RPC]
+    I --> J[Poll confirmation every 1s\nmax 40 attempts]
     J --> K{Confirmed?}
     K -- yes --> L[fetchBalance → UI updates to 5.00 SPRM]
     K -- no --> M[alert: 'Faucet not confirmed']
@@ -57,9 +57,9 @@ flowchart TD
     G -- yes --> I[Bet fires immediately with preset amount]
     H --> J[User adjusts amount or picks preset: 0.5/1/2/5]
     J --> K[User clicks CONFIRM BET]
-    K --> L[Build place_bet tx via Anchor]
-    L --> M[Phantom signs tx]
-    M --> N[sendRawTransaction to RPC\nskipPreflight=true, maxRetries=0]
+    K --> L[Build place_bet tx via ethers contract]
+    L --> M[Wallet signs tx]
+    M --> N[sendRawTransaction to RPC\n(no preflight, retries handled manually)]
     N --> O[Resend every 2s while polling]
     O --> P{Confirmed?}
     P -- yes --> Q[POST /register-bet to server]
@@ -81,7 +81,7 @@ flowchart TD
     E --> F{betRow in minRow–maxRow?}
     F -- win --> G[resolve_bet tx with winRow = betRow]
     F -- lose --> H[resolve_bet tx with winRow ≠ betRow]
-    G --> I[Escrow → user ATA: net payout\nEscrow → treasury: fee]
+    G --> I[Escrow → user address: net payout\nEscrow → treasury: fee]
     H --> J[No transfer — tokens stay in escrow]
     I --> K[Server broadcasts bet_resolved]
     J --> K
@@ -101,10 +101,10 @@ flowchart TD
     E --> F{User connected?}
     F -- yes --> G[User types message → Submit]
     F -- no --> H[Input available but sender shown as 'Anon']
-    G --> I[pubnub.publish:\n{text, sender: short addr, fullSender: full pubkey}]
+    G --> I[pubnub.publish:\n{text, sender: short addr, fullSender: full address}]
     I --> J[All subscribers receive message in real time]
     J --> K[User hovers sender name]
-    K --> L[Fetch SPRM balance via getTokenAccountBalance]
+    K --> L[Fetch SPRM balance via getTokenBalance]
     L --> M[Tooltip shows balance or 'No SPRM account']
 ```
 

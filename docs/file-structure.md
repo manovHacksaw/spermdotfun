@@ -11,8 +11,7 @@ sprmfunv2/
 │
 ├── package.json                       NPM package manifest
 │                                      Scripts: dev | build | start
-│                                      Key deps: next, react, @coral-xyz/anchor,
-│                                               @solana/web3.js, ws, pubnub
+│                                      Key deps: next, react, ethers, wagmi, ws, pubnub
 │
 ├── package-lock.json                  Lockfile (npm)
 │
@@ -29,7 +28,7 @@ sprmfunv2/
 │                                      - Runs WebSocket game server on :3001
 │                                      - Price simulation loop (~30 fps)
 │                                      - VRF engine (SHA-256 based)
-│                                      - On-chain bet resolution via Anchor
+│                                      - On-chain bet resolution via Avalanche contract
 │                                      - Handles POST /register-bet
 │
 ├── Dockerfile                         Multi-stage Docker build
@@ -60,13 +59,13 @@ sprmfunv2/
 │       │
 │       ├── airdrop/
 │       │   └── route.ts               POST /api/airdrop
-│       │                              Airdrops 1 SOL to wallet if balance < 0.1 SOL
-│       │                              (localnet / devnet only)
+│       │                              Sends 1 AVAX from faucet wallet
+│       │                              (local node / testnet only)
 │       │
 │       └── idl/
 │           └── route.ts               GET /api/idl
-│                                      Reads and returns sprmfun_anchor.json
-│                                      (served to the browser for Anchor Program init)
+│                                      Reads and returns legacy Anchor ABI
+│                                      (not used by the current frontend)
 │
 ├── components/
 │   │
@@ -82,17 +81,15 @@ sprmfunv2/
 │   │                                  - Bet modal (confirm amount, submit tx)
 │   │                                  - Side panel (default amount, Quick Bet toggle)
 │   │                                  - Background music (audio element + mute)
-│   │                                  - Anchor Program instance management
+│   │                                  - Ethers `Contract` instance management
 │   │
 │   ├── GlobalChat.tsx                 PubNub chat panel
 │   │                                  - Floating toggle button (bottom-left)
 │   │                                  - Scrollable message list
 │   │                                  - Sender hover → SPRM balance tooltip
 │   │
-│   └── WalletProvider.tsx             Solana wallet context
-│                                      - ConnectionProvider (RPC endpoint)
-│                                      - WalletProvider (Phantom adapter)
-│                                      - WalletModalProvider (Solana wallet UI)
+│   └── WalletProvider.tsx             EVM wallet context (wagmi/ethers)
+│                                      - provides provider, signer, address, network
 │
 ├── public/
 │   ├── delosound-energetic-sports-471133.mp3   Background music file
@@ -117,11 +114,11 @@ sprmfunv2/
 │   ├── file-structure.md              (this file)
 │   └── core-functions.md              All major functions — inputs, outputs, side effects
 │
-└── sprmfun-anchor/                    Anchor workspace (Rust smart contract)
+└── sprmfun-anchor/                    Legacy Solana/Anchor workspace (Rust smart contract, unused)
     │
-    ├── Anchor.toml                    Anchor configuration
-    │                                  cluster = devnet
-    │                                  wallet  = ~/.config/solana/id.json
+│   ├── Anchor.toml                    Anchor configuration (legacy)
+│   │                                  cluster = devnet
+│   │                                  wallet  = ~/.config/solana/id.json  # legacy
     │
     ├── Cargo.toml                     Workspace Cargo manifest
     │
@@ -177,9 +174,9 @@ sprmfunv2/
 | `components/StockGrid.tsx` | All canvas rendering and WS client for the grid |
 | `components/GameHUD.tsx` | Wallet integration, bet modal, faucet, side panel |
 | `components/GlobalChat.tsx` | PubNub-backed real-time chat |
-| `components/WalletProvider.tsx` | Solana wallet context (Phantom) |
-| `sprmfun-anchor/programs/sprmfun-anchor/src/lib.rs` | Rust smart contract |
-| `sprmfun-anchor/target/idl/sprmfun_anchor.json` | Compiled IDL (must exist before `npm run dev`) |
+| `components/WalletProvider.tsx` | EVM wallet context (wagmi/ethers) |
+| `sprmfun-anchor/programs/sprmfun-anchor/src/lib.rs` | Rust smart contract (legacy Solana) |
+| `sprmfun-anchor/target/idl/sprmfun_anchor.json` | Compiled Anchor ABI (legacy, not required) |
 | `scripts/init-devnet.js` | First-run on-chain setup |
 | `scripts/prefund-escrow.js` | House reserve funding |
 

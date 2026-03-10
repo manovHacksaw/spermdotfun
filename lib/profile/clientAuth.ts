@@ -1,6 +1,5 @@
 'use client'
 
-import bs58 from 'bs58'
 
 const AUTH_CACHE_PREFIX = 'sprmfun:profile:auth:v1'
 
@@ -89,8 +88,8 @@ export async function ensureProfileAccessToken(
     throw new Error('Profile auth challenge returned invalid payload')
   }
 
-  const signatureBytes = await signMessage(new TextEncoder().encode(message))
-  const signature = bs58.encode(signatureBytes)
+  // assume signMessage returns a hex string (ethers.js)
+  const signature = await signMessage(message)
 
   const verifyResponse = await fetch('/api/profile/auth/verify', {
     method: 'POST',

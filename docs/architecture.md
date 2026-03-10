@@ -10,7 +10,7 @@ This document provides a high-level overview of the SPRMFUN project architecture
 graph TD
     subgraph Browser["Browser (Player)"]
         UI["Next.js UI\n(React 19)"]
-        WA["Wallet Adapter\n(Phantom)"]
+        WA["Wallet Adapter\n(EVM wallet)"]
     end
 
     subgraph Server["Node.js Server (server.js)"]
@@ -66,8 +66,8 @@ Serves the compiled Next.js application and exposes two API routes:
 
 | Route | Method | Description |
 |---|---|---|
-| `/api/idl` | GET | Returns the compiled Anchor IDL as JSON |
-| `/api/airdrop` | POST | Requests a SOL airdrop on localnet for the given wallet |
+| `/api/idl` | GET | Returns the compiled contract ABI/metadata as JSON |
+| `/api/airdrop` | POST | Requests AVAX tokens from the local faucet for the given wallet |
 | `/register-bet` | POST | Registers a confirmed on-chain bet for server-side resolution |
 
 ### WebSocket Game Server (port 3001)
@@ -95,7 +95,7 @@ sequenceDiagram
     participant User
     participant Browser
     participant Server
-    participant Solana
+    participant Avalanche
 
     User->>Browser: Click grid cell (future column)
     Browser->>Browser: Show bet modal

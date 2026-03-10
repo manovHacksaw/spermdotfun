@@ -2,36 +2,28 @@
 
 import { useState, useEffect, useRef } from 'react'
 import PubNub from 'pubnub'
-import { useWallet, useConnection } from '@solana/wallet-adapter-react'
+import { useAccount } from 'wagmi'
 import { MessageSquare, X, Send } from 'lucide-react'
-import { PublicKey } from '@solana/web3.js'
-import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { getOrCreateUsername, getUsernameMap, deriveUsername } from '@/lib/username'
 import { spermTheme } from '@/components/theme/spermTheme'
+import { useSprmBalance } from '@/hooks/useSprmBalance'
 
 interface ChatMessage {
   text: string
-  sender: string       // short display (e.g. "Ab12…XYZw") — kept for legacy
-  fullSender: string   // full pubkey string for balance lookup
+  sender: string       // short display (e.g. "Ab12…XYZw")
+  fullSender: string   // full address string for balance lookup
   username?: string    // generated random name, e.g. "NeonWolf4823"
   timestamp: number
 }
 
-// SPRM mint PDA (mirrors GameHUD constants)
-const STATE_SEED = Buffer.from('state')
-const MINT_SEED = Buffer.from('mint')
-const PROGRAM_ID = new PublicKey('AouUDBc5RzydyxEUtrH3nf65ZMeZxxVgMzG4cUat8Cd6')
-const [statePda] = PublicKey.findProgramAddressSync([STATE_SEED], PROGRAM_ID)
-const [mintPda] = PublicKey.findProgramAddressSync([MINT_SEED, statePda.toBuffer()], PROGRAM_ID)
-const DECIMALS = 9
+// No on‑chain PDAs required for Avalanche version
 
 const PUBLISH_KEY = process.env.NEXT_PUBLIC_PUBNUB_PUBLISH_KEY || ''
 const SUBSCRIBE_KEY = process.env.NEXT_PUBLIC_PUBNUB_SUBSCRIBE_KEY || ''
 const CHANNEL = 'sprmfun-global-chat'
 
 export default function GlobalChat() {
-  const { publicKey } = useWallet()
-  const { connection } = useConnection()
+  const { address } = useAccount()
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -42,13 +34,9 @@ export default function GlobalChat() {
   const [tooltip, setTooltip] = useState<{ address: string; balance: number | null; loading: boolean } | null>(null)
   const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  async function fetchSprmBalance(address: string): Promise<number | null> {
-    try {
-      const owner = new PublicKey(address)
-      const ata = getAssociatedTokenAddressSync(mintPda, owner)
-      const info = await connection.getTokenAccountBalance(ata)
-      return parseFloat(info.value.uiAmountString ?? '0')
-    } catch { return null }
+  // balance lookup is currently disabled in Avalanche version
+  function fetchSprmBalance(address: string): Promise<number | null> {
+    return Promise.resolve(null)
   }
 
   function handleSenderMouseEnter(fullSender: string) {
@@ -59,10 +47,7 @@ export default function GlobalChat() {
       setTooltip({ address: fullSender, balance: null, loading: false })
       return
     }
-    setTooltip({ address: fullSender, balance: null, loading: true })
-    fetchSprmBalance(fullSender).then(balance => {
-      setTooltip(t => t?.address === fullSender ? { address: fullSender, balance, loading: false } : t)
-    })
+    setTooltip({ address: fullSender, balance: null, loading: false })
   }
 
   function handleSenderMouseLeave() {
@@ -78,7 +63,7 @@ export default function GlobalChat() {
     const pn = new PubNub({
       publishKey: PUBLISH_KEY,
       subscribeKey: SUBSCRIBE_KEY,
-      uuid: publicKey?.toString() || `anon-${Date.now()}`,
+      uuid: address?.toString() || `anon-${Date.now()}`,
     })
     setPubnub(pn)
     pn.subscribe({ channels: [CHANNEL] })
@@ -99,8 +84,8 @@ export default function GlobalChat() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || !pubnub) return
-    const addrStr = publicKey?.toString() ?? ''
-    const shortAddr = addrStr ? `${addrStr.slice(0, 4)}…${addrStr.slice(-4)}` : 'Anon'
+    const addrStr = address ?? ''
+    const shortAddr = addrStr ? `${addrStr.slice(0, 6)}…${addrStr.slice(-4)}` : 'Anon'
     const username = addrStr ? getOrCreateUsername(addrStr) : 'Anon'
     pubnub.publish({
       channel: CHANNEL,

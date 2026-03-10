@@ -1,5 +1,4 @@
 const crypto = require('crypto')
-const { PublicKey } = require('@solana/web3.js')
 
 const ONE_TOKEN = 10 ** 9
 const BET_RESOLVED_EVENT_DISC = crypto.createHash('sha256').update('event:BetResolved').digest().subarray(0, 8)
@@ -25,8 +24,13 @@ function encodeBetResolvedLog({
   BET_RESOLVED_EVENT_DISC.copy(raw, offset)
   offset += 8
 
-  const userBytes = new PublicKey(sourceWallet).toBuffer()
-  userBytes.copy(raw, offset)
+  // convert 0x address to 32-byte padded buffer (left zeros)
+  let addrHex = String(sourceWallet).toLowerCase().replace(/^0x/, '')
+  addrHex = addrHex.padStart(40, '0') // 20 bytes
+  const addrBuf = Buffer.from(addrHex, 'hex')
+  const padded = Buffer.alloc(32)
+  addrBuf.copy(padded, 12)
+  padded.copy(raw, offset)
   offset += 32
 
   raw.writeBigInt64LE(BigInt(boxX), offset)

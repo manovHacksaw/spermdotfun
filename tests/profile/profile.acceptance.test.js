@@ -638,7 +638,7 @@ test('backfill idempotency keeps duplicate inserts at zero on rerun', { skip: HA
     },
   }
 
-  const programId = new PublicKey(createDeterministicWallet('backfill-program').wallet)
+  const programId = createDeterministicWallet('backfill-program').wallet // arbitrary address used for backfill
 
   const firstRun = await service.runBackfill({
     connection,

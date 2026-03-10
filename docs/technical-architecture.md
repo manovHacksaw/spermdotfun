@@ -201,7 +201,7 @@ graph LR
     D --> E["npm start\n→ node server.js"]
 ```
 
-The `builder` stage sets `NEXT_PUBLIC_*` environment variables so they are baked into the static bundle. Server-side secrets (`ANCHOR_WALLET`, `ANCHOR_PROVIDER_URL`) are **not** baked — they must be supplied at runtime. (these variables are legacy but still used for RPC/auth configuration)
+The `builder` stage sets `NEXT_PUBLIC_*` environment variables so they are baked into the static bundle. Server-side secrets (e.g. `RPC_URL`) are **not** baked — they must be supplied at runtime. (any old Anchor-specific variables are legacy and unused)
 
 ---
 
@@ -209,19 +209,12 @@ The `builder` stage sets `NEXT_PUBLIC_*` environment variables so they are baked
 
 ```mermaid
 graph LR
-    SG["StockGrid.tsx"] --> WJS["@solana/web3.js"]
-    GH["GameHUD.tsx"] --> WJS
-    GH["GameHUD.tsx"] --> ETH["ethers.Contract instance"]
-    GH["GameHUD.tsx"] --> SPL["@solana/spl-token"]
-    GH["GameHUD.tsx"] --> WA["@solana/wallet-adapter-react"]
+    SG["StockGrid.tsx"] --> ETH["ethers.js"]
+    GH["GameHUD.tsx"] --> ETH
     GH["GameHUD.tsx"] --> LR["lucide-react"]
     GC["GlobalChat.tsx"] --> PN["pubnub"]
-    GC["GlobalChat.tsx"] --> SPL
-    GC["GlobalChat.tsx"] --> WA
-    WP["WalletProvider.tsx"] --> WA
-    WP["WalletProvider.tsx"] --> WAW["@solana/wallet-adapter-wallets"]
+    GC["GlobalChat.tsx"] --> ETH
+    WP["WalletProvider.tsx"] --> WAG["wagmi / ethers"]
     SRV["server.js"] --> WS["ws"]
-    SRV --> ANC
-    SRV --> WJS
-    SRV --> SPL
+    SRV --> ETH
 ```

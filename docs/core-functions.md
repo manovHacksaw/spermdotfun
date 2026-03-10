@@ -239,7 +239,7 @@ This document catalogues every major function in SPRMFUN with its inputs, output
 | **Inputs** | None (closes over `program`, `publicKey`, `connection`, `signTransaction`, `fetchBalance`) |
 | **Returns** | `Promise<void>` |
 | **Side effects** | May call `POST /api/airdrop`; builds and submits a `faucet(5 × ONE_TOKEN)` transaction; polls for confirmation (max 40 × 1 s); calls `fetchBalance` on success; shows `alert` on error |
-| **Description** | Checks SOL balance; requests an airdrop if below 0.05 SOL; then submits the faucet instruction. Uses resend-every-2-s + polling strategy to handle localnet latency. |
+| **Description** | Checks AVAX balance; requests an airdrop if below 0.01 AVAX; then submits the faucet contract call. Uses resend-every-2-s + polling strategy to handle local node latency. |
 
 ---
 
@@ -274,7 +274,7 @@ This document catalogues every major function in SPRMFUN with its inputs, output
 | | |
 |---|---|
 | **Location** | `GlobalChat.tsx` |
-| **Inputs** | `address: string` — Solana public key (base58) |
+| **Inputs** | `address: string` — EVM address (hex) |
 | **Returns** | `Promise<number \| null>` |
 | **Side effects** | Calls `connection.getTokenAccountBalance` |
 | **Description** | Derives the SPRM ATA for the address and fetches its balance. Returns `null` on any error (account not found, invalid address, etc.). |
@@ -315,7 +315,7 @@ This document catalogues every major function in SPRMFUN with its inputs, output
 | **Inputs** | JSON body: `{ wallet: string }` |
 | **Returns** | `NextResponse` — `{ok, airdropped, sig?, balance}` or `{error}` |
 | **Side effects** | May call `connection.requestAirdrop` and `confirmTransaction` |
-| **Description** | Airdrops 1 SOL to the given wallet if its current balance is below 0.1 SOL. Returns `airdropped: false` if the threshold is already met. |
+| **Description** | Airdrops 1 AVAX to the given wallet if its current balance is below 0.01 AVAX. Returns `airdropped: false` if the threshold is already met. |
 
 ---
 
@@ -328,8 +328,8 @@ This document catalogues every major function in SPRMFUN with its inputs, output
 | **Location** | `app/api/idl/route.ts` |
 | **Inputs** | None |
 | **Returns** | `NextResponse` — parsed IDL JSON |
-| **Side effects** | Reads `sprmfun-anchor/target/idl/sprmfun_anchor.json` from disk |
-| **Description** | Serves the compiled Anchor IDL to the browser so `GameHUD` can construct a typed `anchor.Program` instance. |
+| **Side effects** | Reads legacy `sprmfun-anchor/target/idl/sprmfun_anchor.json` from disk |
+| **Description** | Serves the compiled contract ABI to the browser so `GameHUD` can construct a typed `ethers.Contract` instance (legacy). |
 
 ---
 
@@ -408,7 +408,7 @@ This document catalogues every major function in SPRMFUN with its inputs, output
 
 | | |
 |---|---|
-| **Side effects** | Reads `ANCHOR_WALLET` keypair; calls `initialize(200)` if state PDA doesn't exist; calls `init_atas()` if escrow ATA doesn't exist; logs addresses to stdout |
+| **Side effects** | Reads local keypair; calls contract initialize helper if state is uninitialized; creates token accounts if missing; logs addresses to stdout |
 | **Idempotent** | Yes — skips already-created accounts |
 
 ---
