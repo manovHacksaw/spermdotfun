@@ -66,7 +66,7 @@ Create each file at the exact path shown. Use the template provided for each.
 
 ---
 
-### File 1 — `docs/system-architecture.md`
+### File 1 — `docs/architecture.md` (was previously system-architecture.md)
 ```markdown
 # System Architecture
 
@@ -422,8 +422,8 @@ flowchart TD
 ---
 
 ## Architecture
-[Embed the Mermaid diagram from system-architecture.md]
-Full details → [docs/system-architecture.md](docs/system-architecture.md)
+[Embed the Mermaid diagram from architecture.md]
+Full details → [docs/architecture.md](docs/architecture.md)
 
 ---
 

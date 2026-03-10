@@ -109,7 +109,8 @@ sprmfunv2/
 │                                      Run once after init to seed the house reserve
 │
 ├── docs/
-│   ├── system-architecture.md         High-level component and sequence diagrams
+│   ├── architecture.md                High-level component and sequence diagrams (replaces system-architecture.md)
+│   ├── system-architecture.md         (duplicate/legacy) same as architecture.md
 │   ├── technical-architecture.md      Stack, module map, WS protocol, build pipeline
 │   ├── system-design.md               Grid model, VRF scheme, bet lifecycle, tokenomics
 │   ├── user-flow.md                   Step-by-step user journeys with flowcharts

@@ -1,13 +1,13 @@
 # SPRMFUN — Live Multiplier Grid
 
-SPRMFUN is a real-time, on-chain multiplier-grid betting game built on the [Solana](https://solana.com) blockchain. A live pointer scrolls across a 10-row grid; players click cells in future columns and stake SPRM tokens. When the pointer crosses a column, the server resolves every pending bet on-chain and pays out winners immediately.
+SPRMFUN is a real-time, on-chain multiplier-grid betting game deployed to the [Avalanche](https://avax.network) C‑Chain. A live pointer scrolls across a 10‑row grid; players click cells in future columns and stake SPRM tokens. When the pointer crosses a column, the server resolves every pending bet on-chain and pays out winners immediately.
 
 ---
 
 ## Features
 
 - **Real-time canvas grid** rendered at ~30 fps via `requestAnimationFrame`
-- **Solana smart contract** (Anchor / Rust) for trustless bet placement and payout
+- **Avalanche smart contract** (Solidity) for trustless bet placement and payout
 - **Server-side VRF** (SHA-256 based) determines each column's winning row
 - **SPRM token faucet** — players can claim free tokens on localnet / devnet
 - **Global chat** powered by PubNub; hover a username to see their SPRM balance
@@ -22,11 +22,11 @@ SPRMFUN is a real-time, on-chain multiplier-grid betting game built on the [Sola
 |---|---|
 | Frontend | Next.js 16, React 19, TypeScript |
 | Rendering | HTML5 Canvas (no UI library) |
-| Blockchain | Solana (Anchor 0.32 / Rust) |
+| Blockchain | Avalanche C‑Chain (Solidity) |
 | Token | SPL Token (SPRM, 9 decimals) |
 | Real-time | Node.js `ws` WebSocket server |
 | Chat | PubNub |
-| Wallet | `@solana/wallet-adapter` (Phantom) |
+| Wallet | Ethers-compatible (MetaMask, etc.) |
 | Containerisation | Docker (multi-stage) |
 
 ---
@@ -36,8 +36,8 @@ SPRMFUN is a real-time, on-chain multiplier-grid betting game built on the [Sola
 ### Prerequisites
 
 - Node.js ≥ 20
-- A Solana keypair at `~/.config/solana/id.json` (or set `ANCHOR_WALLET`)
-- A running Solana validator (`solana-test-validator`) **or** a devnet RPC
+- An Avalanche-compatible wallet private key (e.g. MetaMask) or a JSON keystore file
+- A running Avalanche local node (Anvil/Hardhat/Avash) **or** a devnet RPC endpoint
 
 ### 1 — Install dependencies
 
@@ -50,7 +50,7 @@ npm install
 Create a `.env.local` file (never commit it):
 
 ```dotenv
-# Solana RPC used by the browser wallet adapter
+# Avalanche RPC used by the browser wallet adapter
 NEXT_PUBLIC_RPC_URL=http://127.0.0.1:8899
 
 # WebSocket URL broadcast by the game server
@@ -68,11 +68,12 @@ ANCHOR_WALLET=~/.config/solana/id.json
 ### 3 — (First time) Initialise on-chain state
 
 ```bash
-# localnet
+# local network
 node scripts/init-devnet.js
 
-# devnet
-ANCHOR_PROVIDER_URL=https://api.devnet.solana.com node scripts/init-devnet.js
+# public testnet
+# set NEXT_PUBLIC_RPC_URL to the chosen Avalanche RPC before running
+NEXT_PUBLIC_RPC_URL=https://api.avax-test.network node scripts/init-devnet.js
 ```
 
 ### 4 — (Optional) Pre-fund the escrow
@@ -115,21 +116,24 @@ sprmfunv2/
 │   ├── page.tsx             # Home page — renders StockGrid + GameHUD + GlobalChat
 │   ├── globals.css          # Global styles
 │   └── api/
-│       ├── airdrop/route.ts # POST /api/airdrop — localnet SOL faucet
-│       └── idl/route.ts     # GET  /api/idl    — serves compiled Anchor IDL
+│       ├── airdrop/route.ts # POST /api/airdrop — localnet AVAX faucet
+│       └── idl/route.ts     # GET  /api/idl    — (legacy) serves compiled IDL
 ├── components/
 │   ├── StockGrid.tsx        # Canvas-rendered live grid + WebSocket client
 │   ├── GameHUD.tsx          # Wallet UI, bet modal, faucet, side panel
 │   ├── GlobalChat.tsx       # PubNub chat panel
-│   └── WalletProvider.tsx   # @solana/wallet-adapter context
+│   └── WalletProvider.tsx   # Ethers/Web3 wallet context (MetaMask)
 ├── scripts/
 │   ├── init-devnet.js       # One-shot on-chain initialisation
 │   └── prefund-escrow.js    # Pre-fund escrow with SPRM tokens
 ├── server.js                # Node.js: Next.js server + WebSocket game server
-├── sprmfun-anchor/          # Anchor workspace (Rust smart contract)
-│   ├── programs/sprmfun-anchor/src/lib.rs
-│   ├── tests/sprmfun-anchor.ts
-│   └── target/idl/sprmfun_anchor.json
+├── avalanche-contracts/     # Solidity contracts and tests for Avalanche
+│   ├── src/
+│   │   ├── SprmGame.sol
+│   │   └── ...
+│   ├── tests/
+│   │   └── ...
+│   └── foundry.toml
 ├── Dockerfile
 ├── next.config.js
 └── tsconfig.json
@@ -139,17 +143,17 @@ sprmfunv2/
 
 ## Smart Contract
 
-Program ID: `BN8y2gfrrVe1Nira9R9PtN6BzfuyKjQZ1LyoXUT3yJfw`
+The on-chain logic lives in the `avalanche-contracts/` directory and is written in Solidity. Contracts are deployed to the Avalanche C‑Chain; the server interacts with them via `ethers.js`.
 
-| Instruction | Description |
+| Function | Description |
 |---|---|
-| `initialize` | Creates the State PDA and SPRM mint |
-| `init_atas` | Creates the escrow and treasury ATAs |
-| `faucet` | Mints SPRM tokens to the caller's ATA |
-| `consume_vrf` | Authority posts new VRF randomness |
-| `place_bet` | User locks tokens on a grid cell |
-| `resolve_bet` | Authority resolves and pays out a bet |
-| `sweep_escrow` | Admin drains escrow to treasury |
+| `initialize()` | Sets up global state (house edge, VRF seed, etc.) |
+| `faucet()` | Mints SPRM tokens to caller (test networks only) |
+| `placeBet()` | User locks tokens on a grid cell |
+| `resolveBet()` | Authority resolves and pays out a bet |
+| `sweepEscrow()` | Admin drains escrow to treasury |
+
+(Note: previous Solana/Anchor code remains in `sprmfun-anchor/` for reference but is no longer used.)
 
 ---
 
@@ -157,8 +161,9 @@ Program ID: `BN8y2gfrrVe1Nira9R9PtN6BzfuyKjQZ1LyoXUT3yJfw`
 
 | Document | Description |
 |---|---|
-| [System Architecture](docs/system-architecture.md) | High-level component diagram |
+| [Architecture](docs/architecture.md) | High-level component overview and component interactions |
 | [Technical Architecture](docs/technical-architecture.md) | Stack, data flows, inter-process communication |
+| [System Architecture](docs/system-architecture.md) | (deprecated) alias for Architecture overview — kept for backward compatibility |
 | [System Design](docs/system-design.md) | VRF design, betting model, token economics |
 | [User Flow](docs/user-flow.md) | Step-by-step user journeys with diagrams |
 | [File Structure](docs/file-structure.md) | Annotated file tree |
@@ -170,12 +175,12 @@ Program ID: `BN8y2gfrrVe1Nira9R9PtN6BzfuyKjQZ1LyoXUT3yJfw`
 
 | Variable | Where used | Default | Purpose |
 |---|---|---|---|
-| `NEXT_PUBLIC_RPC_URL` | Browser (WalletProvider) | `http://127.0.0.1:8899` | Solana RPC endpoint |
+| `NEXT_PUBLIC_RPC_URL` | Browser (WalletProvider) | `http://127.0.0.1:8545` | Avalanche RPC endpoint |
 | `NEXT_PUBLIC_WS_URL` | Browser (StockGrid, GameHUD) | `ws://localhost:3001` | Game WebSocket URL |
 | `NEXT_PUBLIC_PUBNUB_PUBLISH_KEY` | Browser (GlobalChat) | `''` | PubNub publish key |
 | `NEXT_PUBLIC_PUBNUB_SUBSCRIBE_KEY` | Browser (GlobalChat) | `''` | PubNub subscribe key |
-| `ANCHOR_PROVIDER_URL` | Server / scripts | `http://127.0.0.1:8899` | Solana RPC for server-side calls |
-| `ANCHOR_WALLET` | Server / scripts | `~/.config/solana/id.json` | Path to authority keypair |
+| `ANCHOR_PROVIDER_URL` | Server / scripts | `http://127.0.0.1:8545` | Avalanche RPC for server-side calls (unused?) |
+| `ANCHOR_WALLET` | Server / scripts | `~/.config/avalanche/keystore.json` | Path to authority wallet key |
 | `NODE_ENV` | Server | `development` | Enables/disables Next.js dev mode |
 
 > ⚠️ Never commit `.env` files or keypair JSON files to version control.

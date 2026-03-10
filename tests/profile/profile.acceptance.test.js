@@ -2,12 +2,11 @@ const { test, before, after, beforeEach, afterEach } = require('node:test')
 const assert = require('node:assert/strict')
 const crypto = require('crypto')
 const { Pool } = require('pg')
-const { PublicKey } = require('@solana/web3.js')
 
 const { createProfileDb } = require('../../lib/server/profile-db')
 const { createProfileService } = require('../../lib/server/profile-service')
 const { createTransactionalDbAdapter } = require('./helpers/test-db-adapter')
-const { createDeterministicWallet, signMessageBase58 } = require('./helpers/wallet-crypto')
+const { createDeterministicWallet, signMessage } = require('./helpers/wallet-crypto')
 const { encodeBetResolvedLog } = require('./helpers/bet-resolved-log')
 
 const DB_URL = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL
@@ -280,7 +279,7 @@ test('auth success: challenge -> verify -> token auth', { skip: HAS_DB ? false :
   assert.ok(challenge.nonce)
   assert.ok(challenge.message.includes(wallet.wallet))
 
-  const signature = signMessageBase58(wallet, challenge.message)
+  const signature = await signMessage(wallet, challenge.message)
   const verifyResult = await service.verifyAuthChallenge({
     wallet: wallet.wallet,
     nonce: challenge.nonce,
@@ -303,7 +302,7 @@ test('auth failures: invalid signature, expired nonce, reused nonce, expired tok
   const otherWallet = createDeterministicWallet('auth-failure-other')
 
   const invalidSigChallenge = await service.createAuthChallenge(wallet.wallet)
-  const wrongSignature = signMessageBase58(otherWallet, invalidSigChallenge.message)
+  const wrongSignature = await signMessage(otherWallet, invalidSigChallenge.message)
   await assert.rejects(
     service.verifyAuthChallenge({
       wallet: wallet.wallet,
@@ -326,7 +325,7 @@ test('auth failures: invalid signature, expired nonce, reused nonce, expired tok
     [expiredNonceChallenge.nonce],
   )
 
-  const expiredNonceSignature = signMessageBase58(wallet, expiredNonceChallenge.message)
+  const expiredNonceSignature = await signMessage(wallet, expiredNonceChallenge.message)
   await assert.rejects(
     service.verifyAuthChallenge({
       wallet: wallet.wallet,
@@ -340,7 +339,7 @@ test('auth failures: invalid signature, expired nonce, reused nonce, expired tok
   )
 
   const usedNonceChallenge = await service.createAuthChallenge(wallet.wallet)
-  const usedNonceSignature = signMessageBase58(wallet, usedNonceChallenge.message)
+  const usedNonceSignature = await signMessage(wallet, usedNonceChallenge.message)
   const verified = await service.verifyAuthChallenge({
     wallet: wallet.wallet,
     nonce: usedNonceChallenge.nonce,

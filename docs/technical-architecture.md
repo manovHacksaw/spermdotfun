@@ -11,13 +11,13 @@ This document describes the technical stack, inter-process communication, module
 | Frontend framework | Next.js | ^16.1.6 | App Router; React 19 |
 | Language (frontend) | TypeScript | ^5 | Strict mode |
 | Rendering | HTML5 Canvas | — | No UI library; raw 2D context |
-| Blockchain SDK | `@coral-xyz/anchor` | ^0.32.1 | Provides `Program`, `AnchorProvider`, `BN` |
-| Solana web3 | `@solana/web3.js` | ^1.98.4 | `Connection`, `PublicKey`, `Keypair` |
-| SPL Token | `@solana/spl-token` | ^0.4.14 | ATA helpers, `getAccount` |
-| Wallet adapter | `@solana/wallet-adapter-*` | various | Phantom only (`PhantomWalletAdapter`) |
+| Blockchain SDK | `ethers` | ^6 | Handles contract interactions, provider abstraction |
+| Avalanche web3 | `ethers` | ^6 | RPC connection to Avalanche C‑Chain |
+| Token library | `@openzeppelin/contracts` | ^4 | Standard ERC‑20 helpers used in solidity contracts |
+| Wallet adapter | `@web3-react` / `ethers` | various | MetaMask or other EVM-compatible wallets |
 | Real-time transport | `ws` | ^8.18.0 | Node.js WebSocket server |
 | Chat | PubNub | ^10.2.7 | Browser SDK |
-| Smart contract | Anchor / Rust | 0.32 | `anchor-lang`, `anchor-spl` |
+| Smart contract | Solidity | ^0.8 | Deployed to Avalanche C‑Chain; interfaces via `ethers` |
 | Icons | `lucide-react` | ^0.575.0 | `Volume2`, `VolumeX`, `MessageSquare`, `Send`, `X` |
 | Config | `dotenv` | ^17.3.1 | Loaded in `server.js` |
 | Containerisation | Docker | — | Multi-stage (`deps` → `builder` → `runner`) |
@@ -39,7 +39,7 @@ graph TD
         SG["StockGrid.tsx\n(canvas + WS client)"]
         GH["GameHUD.tsx\n(wallet, betting, faucet)"]
         GC["GlobalChat.tsx\n(PubNub chat)"]
-        WP["WalletProvider.tsx\n(Solana context)"]
+        WP["WalletProvider.tsx\n(Web3/Ethers context)"]
     end
 
     subgraph Server["server.js"]
@@ -48,7 +48,7 @@ graph TD
         SRV_SIM["Simulator loop"]
         SRV_VRF["VRF engine"]
         SRV_BET["Bet resolver"]
-        SRV_CHAIN["Anchor program handle"]
+        SRV_CHAIN["Contract handle (ethers)"]
     end
 
     LAY --> WP
@@ -144,7 +144,7 @@ All messages are JSON strings.
 ### GameHUD
 
 - Overlays the canvas with `pointer-events: none` except for interactive controls
-- Manages the Anchor `Program` instance after wallet connection
+- Manages the Ethers `Contract` instance after wallet connection
 - Maintains a second WebSocket connection (independent of `StockGrid`) for sending `register_bet`
 - Implements transaction retry logic: resends serialised transactions every 2 s while polling for confirmation (up to 40 attempts / ~40 s)
 
@@ -156,40 +156,38 @@ All messages are JSON strings.
 
 ### WalletProvider
 
-- Wraps the tree in `ConnectionProvider → WalletProvider → WalletModalProvider`
-- Hardcodes Phantom as the only wallet adapter
+- Wraps the tree in an Ethers `Web3Provider` context
+- Expects a generic EVM‑compatible wallet (MetaMask default)
 - RPC endpoint is configurable via `NEXT_PUBLIC_RPC_URL`
 
 ---
 
-## Anchor Program Architecture
+## On‑chain Contract Architecture
 
 ```mermaid
 graph TD
-    subgraph PDAs["Program Derived Addresses"]
-        STATE["State PDA\nseeds: [b'state']"]
-        MINTPDA["Mint PDA\nseeds: [b'mint', state]"]
-        ESCROW["Escrow ATA\nassociated_token(mint, state)"]
-        TREASURY["Treasury ATA\nassociated_token(mint, authority)"]
-        BETPDA["Bet PDA\nseeds: [b'bet', user, box_x_le8, box_row]"]
+    subgraph Contracts["Solidity Contracts / Storage"]
+        STATE["State struct\n(single contract storage)"]
+        ESCROW["Escrow balance mapping"]
+        BETS["Bet records mapping (user->cell)"]
     end
 
-    STATE --> MINTPDA
     STATE --> ESCROW
-    STATE --> BETPDA
+    STATE --> BETS
 
-    BETPDA -- "place_bet: transfer" --> ESCROW
-    ESCROW -- "resolve_bet (win): transfer" --> USER_ATA["User ATA"]
-    ESCROW -- "resolve_bet (fee): transfer" --> TREASURY
-    MINTPDA -- "faucet: mint_to" --> USER_ATA
+    BETS -- "placeBet()" --> ESCROW
+    ESCROW -- "resolveBet(win)" --> USER["User address"]
+    ESCROW -- "resolveBet(fee)" --> TREASURY["Treasury address"]
+    STATE -- "faucet()" --> USER
 ```
 
-### Account Sizes
+### Contract Storage Layout
 
-| Account | Size (bytes) | Calculation |
+| Item | Type | Description |
 |---|---|---|
-| `State` | 188 | `8 + 32×3 + 2 + 1 + 8 + 32 + 32 + 8 + 1` |
-| `Bet` | 77 | `8 + 32 + 8 + 1 + 8 + 8 + 1 + 1 + 8 + 1` |
+| `state` | struct | global parameters (vrf, house edge, mint) |
+| `bets[user][col][row]` | struct | individual bet records with amount, resolved flag |
+| `escrowBalance` | uint256 | tokens held pending resolution or house reserve |
 
 ---
 
@@ -203,7 +201,7 @@ graph LR
     D --> E["npm start\n→ node server.js"]
 ```
 
-The `builder` stage sets `NEXT_PUBLIC_*` environment variables so they are baked into the static bundle. Server-side secrets (`ANCHOR_WALLET`, `ANCHOR_PROVIDER_URL`) are **not** baked — they must be supplied at runtime.
+The `builder` stage sets `NEXT_PUBLIC_*` environment variables so they are baked into the static bundle. Server-side secrets (`ANCHOR_WALLET`, `ANCHOR_PROVIDER_URL`) are **not** baked — they must be supplied at runtime. (these variables are legacy but still used for RPC/auth configuration)
 
 ---
 
@@ -213,7 +211,7 @@ The `builder` stage sets `NEXT_PUBLIC_*` environment variables so they are baked
 graph LR
     SG["StockGrid.tsx"] --> WJS["@solana/web3.js"]
     GH["GameHUD.tsx"] --> WJS
-    GH["GameHUD.tsx"] --> ANC["@coral-xyz/anchor"]
+    GH["GameHUD.tsx"] --> ETH["ethers.Contract instance"]
     GH["GameHUD.tsx"] --> SPL["@solana/spl-token"]
     GH["GameHUD.tsx"] --> WA["@solana/wallet-adapter-react"]
     GH["GameHUD.tsx"] --> LR["lucide-react"]
