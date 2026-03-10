@@ -6,6 +6,7 @@ import { useEvmWallet } from '@/components/WalletProvider'
 import { useSessionWalletContext } from '@/context/SessionWalletContext'
 import { useSprmBalance } from '@/hooks/useSprmBalance'
 import { spermTheme } from '@/components/theme/spermTheme'
+import { friendlyError } from '@/lib/friendlyError'
 
 // ── Contract constants ────────────────────────────────────────────────────────
 const TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_ADDRESS ?? ''
@@ -20,9 +21,13 @@ const ERC20_ABI = [
 ]
 
 const GAME_ABI = [
-  'function placeBet(uint32 boxX, uint8 boxRow, uint16 multNum, uint256 amount) returns (uint256 betId)',
-  'event BetPlaced(uint256 indexed betId, address indexed player, uint32 boxX, uint8 boxRow, uint16 multNum, uint256 amount)',
+  'function placeBet(uint32 boxX, uint16 boxRow, uint16 multNum, uint256 amount) returns (uint256 betId)',
+  'event BetPlaced(uint256 indexed betId, address indexed player, uint32 boxX, uint16 boxRow, uint16 multNum, uint256 amount)',
 ]
+
+// Global Mutex to serialize transaction broadcasts and prevent Nonce overlap
+// while still allowing the user to "spray bet" asynchronously.
+let betMutex = Promise.resolve()
 
 export default function GameHUD() {
   const { address, signer, connected } = useEvmWallet()
@@ -33,8 +38,18 @@ export default function GameHUD() {
   // Session wallet (shared context — no prop drilling)
   const session = useSessionWalletContext()
 
-  // Bet modal state
-  const [pendingBet, setPendingBet] = useState<{ colX: number; row: number; multNum: number; multDen: number; multDisp: number } | null>(null)
+  // Bet modal state (switched to queue to support spray betting)
+  const [pendingBetsQueue, setPendingBetsQueue] = useState<{
+    id: string;
+    colX: number;
+    row: number;
+    multNum: number;
+    multDen: number;
+    multDisp: number;
+    status: 'pending' | 'submitting' | 'done' | 'error';
+    txHash?: string;
+  }[]>([])
+  const pendingBet = pendingBetsQueue.find(b => b.status === 'pending') || null // Modal uses the first idle item
   const [betAmount, setBetAmount] = useState('1')
   const [betStatus, setBetStatus] = useState<'idle' | 'submitting' | 'done' | 'error'>('idle')
   const [betError, setBetError] = useState('')
@@ -47,8 +62,13 @@ export default function GameHUD() {
   const [resolution, setResolution] = useState<{ won: boolean; payout: number; txHash?: string; box_row: number } | null>(null)
   const resTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // P/L float animation items
+  const [floatItems, setFloatItems] = useState<{ id: number; won: boolean; amount: number; x: number }[]>([])
+  const floatIdRef = useRef(0)
+
   // Welcome Guide
   const [showGuide, setShowGuide] = useState(false)
+  const [guideStep, setGuideStep] = useState(0)
   useEffect(() => {
     const hasSeenGuide = localStorage.getItem('sprmfun_guide_seen')
     if (!hasSeenGuide) setShowGuide(true)
@@ -83,7 +103,7 @@ export default function GameHUD() {
   // ── Cancel modal — deselect the box in the grid ──────────────────────────
   const cancelBet = useCallback((colX: number, row: number) => {
     window.dispatchEvent(new CustomEvent('sprmfun:deselect', { detail: { colX, row } }))
-    setPendingBet(null)
+    setPendingBetsQueue(prev => prev.filter(b => b.colX !== colX || b.row !== row))
   }, [])
 
   // ── Listen for box-click events from StockGrid ───────────────────────────
@@ -91,14 +111,20 @@ export default function GameHUD() {
     function onSelect(e: CustomEvent) {
       const { colX, row, multNum, multDen, multDisp } = e.detail
       if (!connected && !session.isActive) return
-      const betData = { colX, row, multNum: multNum ?? 150, multDen: multDen ?? 100, multDisp: multDisp ?? 1.5 }
-      if (quickBet) {
+      const betData = { id: `${colX}_${row}`, colX, row, multNum: multNum ?? 150, multDen: multDen ?? 100, multDisp: multDisp ?? 1.5 }
+      const useSession = session.activeWallet === 'instant' && session.isActive && !!session.sessionWallet
+
+      if (quickBet || useSession) {
+        // Spray fire immediately — do not clear queue, just append
+        const newBet = { ...betData, status: 'pending' as const }
         setBetAmount(presetAmount)
-        setPendingBet(betData)
+        setPendingBetsQueue(prev => [...prev.filter(b => b.id !== betData.id), newBet])
         setBetStatus('idle')
         setBetError('')
       } else {
-        setPendingBet(betData)
+        // Native modal — replace queue with just this one to avoid stacking modals
+        const newBet = { ...betData, status: 'pending' as const }
+        setPendingBetsQueue([newBet])
         setBetAmount(presetAmount)
         setBetStatus('idle')
         setBetError('')
@@ -106,7 +132,7 @@ export default function GameHUD() {
     }
     window.addEventListener('sprmfun:select', onSelect as EventListener)
     return () => window.removeEventListener('sprmfun:select', onSelect as EventListener)
-  }, [connected, quickBet, presetAmount, session.isActive])
+  }, [connected, quickBet, presetAmount, session.isActive, session.activeWallet, session.sessionWallet])
 
   // Notify sidebar when pending bet state changes (for Place Bet button)
   useEffect(() => {
@@ -131,13 +157,41 @@ export default function GameHUD() {
       const { won, payout, txHash, box_row, user: betUser } = e.detail
       // Only show for the active user
       if (betUser === address || betUser === session.sessionAddress) {
+        // Clean up from pending queue
+        const betId = `${e.detail.box_x}_${e.detail.box_row}`
+        setPendingBetsQueue(prev => prev.filter(b => b.id !== betId))
+
         if (resTimer.current) clearTimeout(resTimer.current)
         setResolution({ won, payout, txHash, box_row })
         resTimer.current = setTimeout(() => setResolution(null), 6000)
+
+        // Spawn a P/L float item
+        const id = ++floatIdRef.current
+        const x = 35 + Math.random() * 30 // random % of width to spread overlapping bets
+        setFloatItems(prev => [...prev, { id, won, amount: payout, x }])
+        setTimeout(() => setFloatItems(prev => prev.filter(f => f.id !== id)), 2200)
+      }
+    }
+    const onReceipt = (e: CustomEvent) => {
+      const { txHash, user: betUser } = e.detail
+      if (betUser === address || betUser === session.sessionAddress) {
+        setResolution(prev => prev ? { ...prev, txHash } : null)
+      }
+    }
+    const onResolveFailed = (e: CustomEvent) => {
+      const { error, user: betUser } = e.detail
+      if (betUser === address || betUser === session.sessionAddress) {
+        showSessionToast(`Payout failed: ${error}`, false)
       }
     }
     window.addEventListener('sprmfun:betresult', onResult as EventListener)
-    return () => window.removeEventListener('sprmfun:betresult', onResult as EventListener)
+    window.addEventListener('sprmfun:betreceipt', onReceipt as EventListener)
+    window.addEventListener('sprmfun:betresolvefailed', onResolveFailed as EventListener)
+    return () => {
+      window.removeEventListener('sprmfun:betresult', onResult as EventListener)
+      window.removeEventListener('sprmfun:betreceipt', onReceipt as EventListener)
+      window.removeEventListener('sprmfun:betresolvefailed', onResolveFailed as EventListener)
+    }
   }, [address, session.sessionAddress])
 
   // ── Place bet ────────────────────────────────────────────────────────────
@@ -156,30 +210,17 @@ export default function GameHUD() {
     setBetStatus('submitting')
     setBetError('')
 
-    // Use a window flag to block concurrent betting transactions
-    if ((window as any)._sprmBettingInFlight) return
-      ; (window as any)._sprmBettingInFlight = true
-
     // ── Decide which signer to use ────────────────────────────────────────
     const useSession = session.activeWallet === 'instant' && session.isActive && !!session.sessionWallet
 
-    if (!useSession && (!signer || !address)) {
-      ; (window as any)._sprmBettingInFlight = false
-      return
-    }
-    if (useSession && !session.sessionWallet) {
-      ; (window as any)._sprmBettingInFlight = false
-      return
-    }
-
-    // ── Balance check before sending ─────────────────────────────────────
-    const availableBalance = useSession ? (session.sessionSprmBalance ?? 0) : (balance ?? 0)
-    if (amountTokens > availableBalance) {
-      const msg = `Insufficient balance: need ${amountTokens} SPRM, have ${availableBalance.toFixed(4)} SPRM`
+    const currentSprmBal = useSession ? session.sessionSprmBalance : balance
+    if (currentSprmBal === undefined || currentSprmBal === null || currentSprmBal < amountTokens) {
+      const msg = `Insufficient SPRM balance. Need ${amountTokens}, have ${currentSprmBal?.toFixed(2) ?? 0}`
       if (useSession) {
-        showSessionToast('Insufficient balance', false)
-        setPendingBet(null)
-        setBetStatus('idle')
+        showSessionToast('Insufficient SPRM in Instant Wallet', false)
+        if (pendingBet) setPendingBetsQueue(prev => prev.filter(b => b.id !== pendingBet.id))
+        setBetStatus('error')
+          ; (window as any)._sprmBettingInFlight = false
       } else {
         setBetError(msg)
         setBetStatus('error')
@@ -187,113 +228,159 @@ export default function GameHUD() {
       return
     }
 
-    try {
-      let betSigner: ethers.Signer
-      let signerAddress: string
+    // ── Execute Bet ──────────────────────────────────────────────────────────
+    // Fire and forget strategy so multiple can be processed concurrently
+    // Only lock window for the raw modal signing if it's the primary wallet
+    if (!useSession && !quickBet) {
+      if ((window as any)._sprmBettingInFlight) return
+        ; (window as any)._sprmBettingInFlight = true
+    }
 
+    // Set status to submitting
+    setPendingBetsQueue(prev => prev.map(b => b.id === pendingBet.id ? { ...b, status: 'submitting' } : b))
+
+    // Balance check before sending
+    const availableBalance = useSession ? (session.sessionSprmBalance ?? 0) : (balance ?? 0)
+    if (amountTokens > availableBalance) {
+      const msg = `Insufficient balance: need ${amountTokens} SPRM, have ${availableBalance.toFixed(4)} SPRM`
       if (useSession) {
-        // Connect session wallet to JsonRpcProvider (self-funded AVAX for gas)
-        const provider = new ethers.JsonRpcProvider(RPC_URL)
-        betSigner = session.sessionWallet!.connect(provider)
-        signerAddress = session.sessionWallet!.address
+        showSessionToast('Insufficient balance', false)
       } else {
-        betSigner = signer!
-        signerAddress = address!
+        setBetError(msg)
+        setBetStatus('error')
+        setPendingBetsQueue([pendingBet]) // put it back for retry
       }
-
-      if (!TOKEN_ADDRESS || !GAME_ADDRESS) {
-        throw new Error('Contract addresses not configured in environment variables')
+      if (!useSession && !quickBet) {
+        ; (window as any)._sprmBettingInFlight = false
       }
+      return
+    }
 
-      // 1. Approve game contract to spend SPRM
-      //    We check allowance for BOTH primary and session wallets to avoid redundant txs.
-      const token = new ethers.Contract(TOKEN_ADDRESS, ERC20_ABI, betSigner)
-      const allowance: bigint = await token.allowance(signerAddress, GAME_ADDRESS)
+    if (useSession) {
+      // Optimistically deduct balance up front to allow safe spray firing
+      if (session.sessionSprmBalance !== null) session.optimisticDeduct(amountTokens)
+    }
 
-      if (allowance < amountRaw) {
-        console.log(`[BET] insufficient allowance: ${ethers.formatEther(allowance)} < ${ethers.formatEther(amountRaw)}. Approving...`)
-        // For primary wallet, we approve exactly what's needed for safety.
-        // For session wallet, we approve MAX to avoid future prompts.
-        const approveAmt = useSession ? ethers.MaxUint256 : amountRaw
-        const approveTx = await token.approve(GAME_ADDRESS, approveAmt)
-        console.log('[BET] approve tx sent:', approveTx.hash)
-        await approveTx.wait()
-        console.log('[BET] approve tx confirmed')
-      }
+    // Serialize execution to prevent exact-moment Nonce collisions 
+    // when "spray betting" very fast.
+    betMutex = betMutex.then(async () => {
+      try {
+        let betSigner: ethers.Signer
+        let signerAddress: string
 
-      // 2. Call placeBet on the game contract
-      // multNum is a uint16 — e.g. 173 for 1.73x
-      const game = new ethers.Contract(GAME_ADDRESS, GAME_ABI, betSigner)
-      const multNum16 = Math.round(multNum) & 0xFFFF // ensure uint16 range
-      const betTx = await game.placeBet(
-        box_x,       // uint32 pixel coordinate
-        box_row,     // uint8 row index
-        multNum16,   // uint16 multiplier numerator (e.g. 173 = 1.73x)
-        amountRaw,   // uint256 SPRM amount (18 decimals)
-      )
-      console.log('[BET] placeBet tx:', betTx.hash)
-      const receipt = await betTx.wait()
+        if (useSession) {
+          // Connect session wallet to JsonRpcProvider (self-funded AVAX for gas)
+          const provider = new ethers.JsonRpcProvider(RPC_URL)
+          betSigner = session.sessionWallet!.connect(provider)
+          signerAddress = session.sessionWallet!.address
 
-      // 3. Extract betId from BetPlaced event logs
-      let betId: bigint | null = null
-      if (receipt && receipt.logs) {
-        const gameInterface = new ethers.Interface(GAME_ABI)
-        for (const log of receipt.logs) {
-          try {
-            const parsed = gameInterface.parseLog({ topics: log.topics as string[], data: log.data })
-            if (parsed && parsed.name === 'BetPlaced') {
-              betId = parsed.args[0] as bigint
-              break
-            }
-          } catch { /* not this event */ }
+          // Check if session wallet has AVAX for gas
+          const avaxBal = await provider.getBalance(signerAddress)
+          if (avaxBal === BigInt(0)) {
+            showSessionToast('Insta Wallet needs AVAX for gas! Click "Top Up Gas".', false)
+            setBetStatus('error')
+            return
+          }
+        } else {
+          // Mutex serializes bets so plain signer is safe — no nonce overlap possible
+          betSigner = signer!
+          signerAddress = address!
+        }
+
+        if (!TOKEN_ADDRESS || !GAME_ADDRESS) {
+          throw new Error('Contract addresses not configured in environment variables')
+        }
+
+        // 1. Approve game contract to spend SPRM
+        //    We check allowance for BOTH primary and session wallets to avoid redundant txs.
+        const token = new ethers.Contract(TOKEN_ADDRESS, ERC20_ABI, betSigner)
+        const allowance: bigint = await token.allowance(signerAddress, GAME_ADDRESS)
+
+        if (allowance < amountRaw) {
+          console.log(`[BET] insufficient allowance: ${ethers.formatEther(allowance)} < ${ethers.formatEther(amountRaw)}. Approving...`)
+          // For primary wallet, we approve exactly what's needed for safety.
+          // For session wallet, we approve MAX to avoid future prompts.
+          const approveAmt = useSession ? ethers.MaxUint256 : amountRaw
+          const approveTx = await token.approve(GAME_ADDRESS, approveAmt)
+          console.log('[BET] approve tx sent:', approveTx.hash)
+          await approveTx.wait()
+          console.log('[BET] approve tx confirmed')
+        }
+
+        // 2. Call placeBet on the game contract
+        // multNum is a uint16 — e.g. 173 for 1.73x
+        const game = new ethers.Contract(GAME_ADDRESS, GAME_ABI, betSigner)
+        const multNum16 = Math.round(multNum) & 0xFFFF // ensure uint16 range
+        const betTx = await game.placeBet(
+          box_x,       // uint32 pixel coordinate
+          box_row,     // uint8 row index
+          multNum16,   // uint16 multiplier numerator (e.g. 173 = 1.73x)
+          amountRaw,   // uint256 SPRM amount (18 decimals)
+        )
+        console.log('[BET] placeBet tx:', betTx.hash)
+        const receipt = await betTx.wait()
+
+        // 3. Extract betId from BetPlaced event logs
+        let betId: bigint | null = null
+        if (receipt && receipt.logs) {
+          const gameInterface = new ethers.Interface(GAME_ABI)
+          for (const log of receipt.logs) {
+            try {
+              const parsed = gameInterface.parseLog({ topics: log.topics as string[], data: log.data })
+              if (parsed && parsed.name === 'BetPlaced') {
+                betId = parsed.args[0] as bigint
+                break
+              }
+            } catch { /* not this event */ }
+          }
+        }
+
+        console.log('[BET] betId:', betId?.toString())
+
+        const refCode = typeof window !== 'undefined' ? localStorage.getItem('sprmfun_ref') : null
+
+        // 4. Register the bet with the server for auto-resolution
+        fetch('/register-bet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            betId: betId?.toString() ?? '',
+            user: signerAddress,
+            box_x,
+            box_row,
+            mult_num: multNum16,
+            bet_amount: amountTokens,
+            referralCode: refCode,
+          }),
+        }).then(() => console.log('[BET] register-bet sent to server'))
+          .catch(e => console.warn('[BET] register-bet failed:', e.message))
+
+
+        setBetStatus('done')
+        if (useSession) {
+          showSessionToast(`Bet placed — ${amountTokens} SPRM @ ${multDisp.toFixed(2)}x`, true)
+        } else {
+          await refreshBalance()
+          setTimeout(() => { setBetStatus('idle') }, 1500)
+        }
+      } catch (err: any) {
+        console.error('[BET]', err)
+        const errMsg = friendlyError(err)
+        if (useSession) {
+          showSessionToast(errMsg, false)
+          setPendingBetsQueue(prev => prev.filter(b => b.id !== pendingBet.id))
+        } else {
+          setBetError(errMsg)
+          setBetStatus('error')
+          setPendingBetsQueue(prev => prev.map(b => b.id === pendingBet.id ? { ...b, status: 'error' } : b))
+        }
+      } finally {
+        if (!useSession && !quickBet) {
+          ; (window as any)._sprmBettingInFlight = false
         }
       }
-
-      console.log('[BET] betId:', betId?.toString())
-
-      // 4. Register the bet with the server for auto-resolution
-      fetch('/register-bet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          betId: betId?.toString() ?? '',
-          user: signerAddress,
-          box_x,
-          box_row,
-          mult_num: multNum16,
-          bet_amount: amountTokens,
-        }),
-      }).then(() => console.log('[BET] register-bet sent to server'))
-        .catch(e => console.warn('[BET] register-bet failed:', e.message))
-
-      setBetStatus('done')
-      if (useSession) {
-        if (session.sessionSprmBalance !== null) session.optimisticDeduct(amountTokens)
-        showSessionToast(`Bet placed — ${amountTokens} SPRM @ ${multDisp.toFixed(2)}x`, true)
-        setPendingBet(null)
-        setBetStatus('idle')
-      } else {
-        await refreshBalance()
-        setTimeout(() => { setPendingBet(null); setBetStatus('idle') }, 1500)
-      }
-    } catch (err: any) {
-      console.error('[BET]', err)
-      if (useSession) {
-        const isNoGas = err?.code === 'INSUFFICIENT_FUNDS' || err?.message?.includes('insufficient funds')
-        const msg = isNoGas
-          ? 'Session needs AVAX gas — top up in sidebar'
-          : 'Bet failed: ' + (err?.message?.slice(0, 50) ?? 'error')
-        showSessionToast(msg, false)
-        setPendingBet(null)
-        setBetStatus('idle')
-      } else {
-        setBetError(err?.message?.slice(0, 120) ?? 'Transaction failed')
-        setBetStatus('error')
-      }
-    } finally {
-      ; (window as any)._sprmBettingInFlight = false
-    }
-  }, [signer, address, pendingBet, betAmount, balance, session, refreshBalance])
+    }).catch(e => console.error("Mutex Error:", e))
+  }, [signer, address, pendingBetsQueue, pendingBet, betAmount, balance, session, refreshBalance, quickBet])
 
   // Sidebar "Place Bet" button triggers same handler (must be after handlePlaceBet is defined)
   useEffect(() => {
@@ -342,7 +429,7 @@ export default function GameHUD() {
     borderRadius: 8, padding: '28px 32px',
     minWidth: 320, color: spermTheme.textPrimary,
     display: 'flex', flexDirection: 'column', gap: 18,
-    boxShadow: `0 0 40px rgba(212,170,255,0.08)`,
+    boxShadow: `0 0 40px rgba(232,65,66,0.10)`,
   }
 
   return (
@@ -351,49 +438,113 @@ export default function GameHUD() {
       {showGuide && (
         <div style={{
           position: 'absolute', inset: 0,
-          background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
+          background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(12px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 100, pointerEvents: 'all',
+          zIndex: 1000, pointerEvents: 'all',
         }}>
           <div style={{
             background: spermTheme.bgElevated,
             border: `1px solid ${spermTheme.accentBorder}`,
-            borderRadius: 12, padding: 32, maxWidth: 440,
-            display: 'flex', flexDirection: 'column', gap: 24,
+            borderRadius: 16, padding: 0, maxWidth: 480, width: '90%',
+            overflow: 'hidden',
+            display: 'flex', flexDirection: 'column',
             color: spermTheme.textPrimary,
-            boxShadow: `0 0 60px rgba(0,0,0,0.5), 0 0 30px ${spermTheme.accentGlow}`,
-            animation: 'sprmIn 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
-            backdropFilter: 'blur(20px)',
+            boxShadow: `0 0 80px rgba(0,0,0,0.7), 0 0 40px ${spermTheme.accentGlow}`,
+            animation: 'sprmIn 0.6s cubic-bezier(0.16, 1, 0.3, 1)',
           }}>
-            <div style={{ fontSize: 24, fontWeight: 900, color: spermTheme.accent, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace" }}>SYSTEM_INITIALIZE</div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: 14, color: spermTheme.textSecondary, lineHeight: 1.6 }}>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{ color: spermTheme.accent, fontWeight: 700 }}>01.</div>
-                <div>Pick a box in the future. The closer to the current time, the higher the risk!</div>
+            {/* Header / Progress */}
+            <div style={{
+              background: 'rgba(232,65,66,0.08)',
+              padding: '24px 32px 18px',
+              borderBottom: `1px solid ${spermTheme.borderChrome}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+            }}>
+              <div style={{ fontSize: 20, fontWeight: 900, color: spermTheme.accent, letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace" }}>
+                CORE_ONBOARDING
               </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{ color: spermTheme.accent, fontWeight: 700 }}>02.</div>
-                <div>The <b>Sperm</b> moves based on live AVAX/USDT price momentum. Velocity = Price Change.</div>
-              </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{ color: spermTheme.accent, fontWeight: 700 }}>03.</div>
-                <div>Use <b>Instant Wallet</b> for gasless, rapid-fire betting with zero confirmation popups.</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[0, 1, 2].map(s => (
+                  <div key={s} style={{
+                    width: guideStep === s ? 18 : 6,
+                    height: 6,
+                    borderRadius: 3,
+                    background: guideStep === s ? spermTheme.accent : spermTheme.textTertiary,
+                    transition: 'all 0.3s ease'
+                  }} />
+                ))}
               </div>
             </div>
 
-            <button
-              onClick={closeGuide}
-              style={{
-                marginTop: 10, padding: '12px 0',
-                background: spermTheme.accentSoft, border: `1.5px solid ${spermTheme.accentBorder}`,
-                borderRadius: 10, color: spermTheme.accent, fontWeight: 800,
-                cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >
-              GOT IT, LET'S GO!
-            </button>
+            {/* Steps Content */}
+            <div style={{ padding: '32px', minHeight: 180 }}>
+              {guideStep === 0 && (
+                <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 12 }}>THE PRICE GRID</div>
+                  <p style={{ fontSize: 14, color: spermTheme.textSecondary, lineHeight: 1.6 }}>
+                    Every box on the screen represents a <b>Future Price Range</b>.
+                    The grid moves left as time passes. Pick a box where you think the "Sperm" will land!
+                  </p>
+                </div>
+              )}
+              {guideStep === 1 && (
+                <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 12 }}>INSTANT BETTING</div>
+                  <p style={{ fontSize: 14, color: spermTheme.textSecondary, lineHeight: 1.6 }}>
+                    Click ⚡ <b>Start Session</b> to lock some SPRM and get gasless, 1-click execution.
+                    No transaction popups. Perfect for rapid-fire adjustments.
+                  </p>
+                </div>
+              )}
+              {guideStep === 2 && (
+                <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 12 }}>SOCIAL & REWARDS</div>
+                  <p style={{ fontSize: 14, color: spermTheme.textSecondary, lineHeight: 1.6 }}>
+                    Top players on the leaderboard receive bonus SPRM every hour.
+                    Watch the <b>Live Feed</b> to see what the pros are doing and refine your strategy.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div style={{ padding: '24px 32px 32px', display: 'flex', gap: 12 }}>
+              {guideStep > 0 && (
+                <button
+                  onClick={() => setGuideStep(s => s - 1)}
+                  style={{
+                    flex: 1, padding: '12px 0',
+                    background: 'rgba(255,255,255,0.05)', border: `1px solid ${spermTheme.borderChrome}`,
+                    borderRadius: 10, color: spermTheme.textSecondary, fontWeight: 700,
+                    cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s'
+                  }}
+                >
+                  PREVIOUS
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  if (guideStep < 2) setGuideStep(s => s + 1)
+                  else closeGuide()
+                }}
+                style={{
+                  flex: 2, padding: '12px 0',
+                  background: 'linear-gradient(135deg, #E84142, #FF5A5F)', border: 'none',
+                  borderRadius: 10, color: '#fff', fontWeight: 800,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  boxShadow: '0 8px 24px rgba(232,65,66,0.3)',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {guideStep < 2 ? 'NEXT STEP' : 'ENTER SYSTEM'}
+              </button>
+            </div>
           </div>
+          <style>{`
+            @keyframes fadeIn {
+              from { opacity: 0; transform: translateY(10px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+          `}</style>
         </div>
       )}
 
@@ -462,7 +613,11 @@ export default function GameHUD() {
               ? `PROFIT: +${resolution.payout.toFixed(3)} SPRM`
               : `SETTLED: LOSS [ROW_${resolution.box_row}]`}
           </div>
-          {resolution.txHash && (
+          {resolution.txHash === 'pending' ? (
+            <div style={{ fontSize: 13, color: spermTheme.textTertiary, fontStyle: 'italic', marginTop: 8 }}>
+              Resolving on-chain...
+            </div>
+          ) : resolution.txHash ? (
             <a
               href={`https://testnet.snowtrace.io/tx/${resolution.txHash}`}
               target="_blank" rel="noreferrer"
@@ -474,7 +629,7 @@ export default function GameHUD() {
             >
               View on Snowtrace <span style={{ fontSize: 12 }}>↗</span>
             </a>
-          )}
+          ) : null}
           <style>{`
             @keyframes sprmIn {
               from { opacity: 0; transform: translate(-50%, -30px) scale(0.9); }
@@ -580,6 +735,88 @@ export default function GameHUD() {
         </div>
       )}
 
+      {/* ── P/L Float Animations ── */}
+      {floatItems.map(item => (
+        <div
+          key={item.id}
+          style={{
+            position: 'absolute',
+            left: `${item.x}%`,
+            bottom: '38%',
+            transform: 'translateX(-50%)',
+            pointerEvents: 'none',
+            zIndex: 55,
+            animation: 'plFloat 2.1s cubic-bezier(0.16,1,0.3,1) forwards',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 18,
+            fontWeight: 800,
+            letterSpacing: 0.5,
+            color: item.won ? '#34D399' : '#FF5A5F',
+            textShadow: item.won
+              ? '0 0 12px rgba(52,211,153,0.80), 0 0 24px rgba(52,211,153,0.40)'
+              : '0 0 12px rgba(255,90,95,0.80), 0 0 24px rgba(232,65,66,0.40)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {item.won ? `+${item.amount.toFixed(2)} SPRM` : `-${item.amount.toFixed(2)} SPRM`}
+        </div>
+      ))}
+      <style>{`
+        @keyframes plFloat {
+          0%   { opacity: 0;    transform: translateX(-50%) translateY(0px)   scale(0.7); }
+          12%  { opacity: 1;    transform: translateX(-50%) translateY(-8px)  scale(1.05); }
+          40%  { opacity: 1;    transform: translateX(-50%) translateY(-28px) scale(1); }
+          100% { opacity: 0;    transform: translateX(-50%) translateY(-80px) scale(0.85); }
+        }
+      `}</style>
+
+      {/* ── Bet Queue HUD (bottom-left) ── */}
+      {pendingBetsQueue.some(b => b.status !== 'pending') && (
+        <div style={{
+          position: 'absolute', bottom: 20, left: 20,
+          display: 'flex', flexDirection: 'column', gap: 6,
+          zIndex: 45, pointerEvents: 'all',
+        }}>
+          {pendingBetsQueue.filter(b => b.status !== 'pending').map(b => (
+            <div key={b.id} style={{
+              background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)',
+              border: `1px solid ${b.status === 'error' ? spermTheme.error : spermTheme.accentBorder}`,
+              borderRadius: 6, padding: '6px 12px',
+              display: 'flex', alignItems: 'center', gap: 10,
+              animation: 'slideInLeft 0.3s ease-out',
+            }}>
+              <div style={{
+                width: 6, height: 6, borderRadius: '50%',
+                background: b.status === 'submitting' ? spermTheme.accent : b.status === 'error' ? spermTheme.error : spermTheme.success,
+                animation: b.status === 'submitting' ? 'pulse-soft 1s infinite' : 'none',
+              }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: spermTheme.textPrimary, fontFamily: "'JetBrains Mono', monospace" }}>
+                {b.multDisp.toFixed(2)}x
+              </span>
+              <span style={{ fontSize: 10, color: spermTheme.textTertiary }}>
+                {b.status === 'submitting' ? 'Confirming…' : b.status === 'error' ? 'Failed' : 'Ready'}
+              </span>
+              {b.status === 'error' && (
+                <button
+                  onClick={() => setPendingBetsQueue(prev => prev.filter(q => q.id !== b.id))}
+                  style={{ background: 'transparent', border: 'none', color: spermTheme.textTertiary, cursor: 'pointer', fontSize: 10 }}
+                >✕</button>
+              )}
+            </div>
+          ))}
+          <style>{`
+            @keyframes slideInLeft {
+              from { opacity: 0; transform: translateX(-20px); }
+              to { opacity: 1; transform: translateX(0); }
+            }
+            @keyframes pulse-soft {
+              0% { opacity: 0.4; transform: scale(0.8); }
+              50% { opacity: 1; transform: scale(1.1); }
+              100% { opacity: 0.4; transform: scale(0.8); }
+            }
+          `}</style>
+        </div>
+      )}
     </div>
   )
 }

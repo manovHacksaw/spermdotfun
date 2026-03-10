@@ -1,35 +1,46 @@
 export const spermTheme = {
-  /** Deepest obsidian base for maximum contrast */
-  bgBase: '#020205',
-  /** Professional glass with neutral tint */
-  bgElevated: 'rgba(10,10,14,0.85)',
-  bgGlass: 'rgba(8,8,12,0.55)',
-  bgGlassStrong: 'rgba(6,6,10,0.75)',
+  /** Deep AVAX-inspired dark base */
+  bgBase: '#0B0B0F',
+  bgPanel: '#0F1319',
+  bgCard: '#11141A',
+  bgHover: '#161D26',
 
-  /** Industrial gunmetal chrome for sidebars/readouts */
-  bgChrome: 'rgba(0,0,0,0.62)',
-  bgChromeStrong: 'rgba(4,4,6,0.82)',
-  bgChromeSoft: 'rgba(12,12,16,0.58)',
+  /** Legacy aliases — kept for compatibility */
+  bgElevated: 'rgba(15,19,25,0.96)',
+  bgGlass: 'rgba(11,11,15,0.72)',
+  bgGlassStrong: 'rgba(9,9,13,0.88)',
+  bgChrome: 'rgba(15,19,25,0.92)',
+  bgChromeStrong: 'rgba(11,11,15,0.96)',
+  bgChromeSoft: 'rgba(17,20,26,0.72)',
 
-  /** Ultra-thin borders for premium look */
-  borderChrome: 'rgba(255,255,245,0.08)',
-  borderSoft: 'rgba(255,255,245,0.06)',
-  borderFaint: 'rgba(255,255,245,0.03)',
+  /** Borders */
+  borderChrome: 'rgba(255,255,255,0.06)',
+  borderSoft: 'rgba(255,255,255,0.04)',
+  borderFaint: 'rgba(255,255,255,0.025)',
+  borderAccent: 'rgba(232,65,66,0.32)',
 
-  /** High-fidelity typography colors */
-  textPrimary: '#F5F5F2',
-  textSecondary: 'rgba(245,245,242,0.65)',
-  textTertiary: 'rgba(245,245,242,0.40)',
+  /** Typography */
+  textPrimary: '#E6E8EB',
+  textSecondary: '#9BA3AF',
+  textTertiary: '#4B5563',
 
-  /** Refined neon accent */
-  accent: '#D4AAFF',
-  accentSoft: 'rgba(212,170,255,0.12)',
-  accentBorder: 'rgba(212,170,255,0.35)',
-  accentGlow: 'rgba(212,170,255,0.22)',
+  /** Primary accent: Avalanche Red */
+  accent: '#E84142',
+  accentBright: '#FF5A5F',
+  accentSoft: 'rgba(232,65,66,0.10)',
+  accentBorder: 'rgba(232,65,66,0.32)',
+  accentGlow: 'rgba(232,65,66,0.20)',
 
-  /** Semantic indicators */
-  success: '#98D6C2',
-  error: '#E396AA',
+  /** Gold for big wins / multipliers */
+  gold: '#F59E0B',
+  goldSoft: 'rgba(245,158,11,0.15)',
+  goldBorder: 'rgba(245,158,11,0.4)',
+
+  /** Semantic */
+  success: '#10B981',
+  successSoft: 'rgba(16,185,129,0.12)',
+  error: '#EF4444',
+  errorSoft: 'rgba(239,68,68,0.12)',
 } as const
 
 export type SpermTheme = typeof spermTheme

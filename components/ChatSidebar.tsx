@@ -1,27 +1,22 @@
-'use client'
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useProfileData } from '@/hooks/useProfileData'
 import PubNub from 'pubnub'
-import { useWallet, useConnection } from '@solana/wallet-adapter-react'
-import { Send, MessageSquare, Trophy, Image as ImageIcon } from 'lucide-react'
-import { PublicKey } from '@solana/web3.js'
-import { getAssociatedTokenAddressSync } from '@solana/spl-token'
+import { Send, MessageSquare, Trophy, Image as ImageIcon, X } from 'lucide-react'
 import type { LeaderEntry } from '@/hooks/useLiveGameStats'
 import { RAIL_COLORS } from '@/components/leftRailShared'
 import { spermTheme } from '@/components/theme/spermTheme'
+import { useEvmWallet } from '@/components/WalletProvider'
+import { ethers } from 'ethers'
 
-const STATE_SEED = Buffer.from('state')
-const MINT_SEED = Buffer.from('mint')
-const PROGRAM_ID = new PublicKey('AouUDBc5RzydyxEUtrH3nf65ZMeZxxVgMzG4cUat8Cd6')
-const [statePda] = PublicKey.findProgramAddressSync([STATE_SEED], PROGRAM_ID)
-const [mintPda] = PublicKey.findProgramAddressSync([MINT_SEED, statePda.toBuffer()], PROGRAM_ID)
-
+// ── Environment config ────────────────────────────────────────────────────────
 const PUBLISH_KEY = process.env.NEXT_PUBLIC_PUBNUB_PUBLISH_KEY || ''
 const SUBSCRIBE_KEY = process.env.NEXT_PUBLIC_PUBNUB_SUBSCRIBE_KEY || ''
-const CHANNEL = 'sprmfun-global-chat'
+const CHANNEL = 'sprm_crash_chat'
 const GIPHY_API_KEY = process.env.NEXT_PUBLIC_GIPHY_API_KEY || ''
+const TOKEN_ADDRESS = process.env.NEXT_PUBLIC_TOKEN_ADDRESS
+const RPC_URL = process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL || 'https://api.avax-test.network/ext/bc/C/rpc'
 
-type Tab = 'chat' | 'leaderboard'
+type Tab = 'chat' | 'leaderboard' | 'trades'
 
 interface ChatMessage {
   text: string
@@ -33,6 +28,7 @@ interface ChatMessage {
 
 interface ChatSidebarProps {
   leaderboard: LeaderEntry[]
+  onClose?: () => void
 }
 
 const AVATAR_PALETTES = [
@@ -69,22 +65,23 @@ function getLevel(sender: string) {
   return Math.abs(hash % 50) + 1
 }
 
-async function fetchSprmBalance(address: string, connection: any): Promise<number | null> {
+async function fetchSprmBalance(address: string): Promise<number | null> {
   try {
-    const owner = new PublicKey(address)
-    const ata = getAssociatedTokenAddressSync(mintPda, owner)
-    const info = await connection.getTokenAccountBalance(ata)
-    return parseFloat(info.value.uiAmountString ?? '0')
+    if (!TOKEN_ADDRESS) return null
+    const provider = new ethers.JsonRpcProvider(RPC_URL)
+    const token = new ethers.Contract(TOKEN_ADDRESS, ['function balanceOf(address) view returns (uint256)'], provider)
+    const bal = await token.balanceOf(address)
+    return parseFloat(ethers.formatEther(bal))
   } catch {
     return null
   }
 }
 
-export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
-  const { publicKey } = useWallet()
-  const { connection } = useConnection()
+export default function ChatSidebar({ leaderboard, onClose }: ChatSidebarProps) {
+  const { address } = useEvmWallet()
 
   const [tab, setTab] = useState<Tab>('chat')
+  const { transactions, transactionsLoading } = useProfileData(address || null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [pubnub, setPubnub] = useState<PubNub | null>(null)
@@ -112,7 +109,7 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
     const pn = new PubNub({
       publishKey: PUBLISH_KEY,
       subscribeKey: SUBSCRIBE_KEY,
-      uuid: publicKey?.toString() || `anon-${Date.now()}`,
+      uuid: address || `anon-${Date.now()}`,
     })
 
     setPubnub(pn)
@@ -148,7 +145,7 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
     return () => {
       pn.unsubscribe({ channels: [CHANNEL] })
     }
-  }, [publicKey])
+  }, [address])
 
   useEffect(() => {
     if (tab === 'chat') bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -159,8 +156,8 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
       e.preventDefault()
       if (!input.trim() || !pubnub) return
 
-      const shortAddr = publicKey
-        ? `${publicKey.toString().slice(0, 4)}…${publicKey.toString().slice(-4)}`
+      const shortAddr = address
+        ? `${address.slice(0, 4)}…${address.slice(-4)}`
         : 'Anon'
 
       pubnub.publish({
@@ -168,32 +165,32 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
         message: {
           text: input.trim(),
           sender: shortAddr,
-          fullSender: publicKey?.toString() || shortAddr,
+          fullSender: address || shortAddr,
         },
       })
       setInput('')
     },
-    [input, pubnub, publicKey]
+    [input, pubnub, address]
   )
 
   const handleGifSelect = useCallback(
     (gifUrl: string) => {
       if (!pubnub) return
-      const shortAddr = publicKey
-        ? `${publicKey.toString().slice(0, 4)}…${publicKey.toString().slice(-4)}`
+      const shortAddr = address
+        ? `${address.slice(0, 4)}…${address.slice(-4)}`
         : 'Anon'
       pubnub.publish({
         channel: CHANNEL,
         message: {
           text: gifUrl,
           sender: shortAddr,
-          fullSender: publicKey?.toString() || shortAddr,
+          fullSender: address || shortAddr,
           isGif: true,
         },
       })
       setShowGifPicker(false)
     },
-    [pubnub, publicKey]
+    [pubnub, address]
   )
 
   const fetchGifs = useCallback(async (query: string) => {
@@ -232,7 +229,7 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
       return
     }
     setTooltip({ address: fullSender, balance: null, loading: true })
-    fetchSprmBalance(fullSender, connection).then((balance) => {
+    fetchSprmBalance(fullSender).then((balance) => {
       setTooltip((curr) => (curr?.address === fullSender ? { address: fullSender, balance, loading: false } : curr))
     })
   }
@@ -251,29 +248,68 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
 
   return (
     <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', borderBottom: `1px solid ${RAIL_COLORS.border}`, background: 'rgba(255,255,255,0.02)', flexShrink: 0 }}>
+      {/* Panel header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '12px 14px 0',
+        flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: spermTheme.success,
+            boxShadow: '0 0 6px rgba(16,185,129,0.7)',
+            animation: 'pulse-dot 2.5s infinite',
+          }} />
+          <span style={{
+            fontSize: 11, fontWeight: 700, letterSpacing: 1.5,
+            color: spermTheme.textSecondary, textTransform: 'uppercase',
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>
+            Community
+          </span>
+        </div>
+
+        {onClose && (
+          <button
+            onClick={onClose}
+            style={{
+              width: 28,
+              height: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(255,255,255,0.05)',
+              border: `1px solid ${spermTheme.borderChrome}`,
+              borderRadius: 6,
+              color: spermTheme.textSecondary,
+              cursor: 'pointer',
+              zIndex: 10,
+            }}
+          >
+            <X size={16} />
+          </button>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', borderBottom: `1px solid ${spermTheme.borderChrome}`, marginTop: 10, flexShrink: 0 }}>
         {([
           { id: 'chat', icon: <MessageSquare size={12} />, label: 'CHAT' },
-          { id: 'leaderboard', icon: <Trophy size={12} />, label: 'LEADERBOARD' },
+          { id: 'leaderboard', icon: <Trophy size={12} />, label: 'LEADERS' },
+          { id: 'trades', icon: <MessageSquare size={12} />, label: 'MY TRADES' },
         ] as { id: Tab; icon: React.ReactNode; label: string }[]).map((tabBtn) => (
           <button
             key={tabBtn.id}
             onClick={() => setTab(tabBtn.id)}
             style={{
-              flex: 1,
-              padding: '12px 4px',
-              background: tab === tabBtn.id ? 'rgba(212,170,255,0.05)' : 'transparent',
-              border: 'none',
-              borderBottom: tab === tabBtn.id ? `2px solid ${spermTheme.accent}` : '2px solid transparent',
-              color: tab === tabBtn.id ? spermTheme.accent : spermTheme.textTertiary,
+              flex: 1, padding: '10px 4px',
+              background: 'transparent', border: 'none',
+              borderBottom: tab === tabBtn.id ? `2px solid #E84142` : '2px solid transparent',
+              color: tab === tabBtn.id ? '#FF5A5F' : spermTheme.textTertiary,
               cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              fontSize: 10,
-              letterSpacing: 1.5,
-              fontWeight: 800,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              fontSize: 10, letterSpacing: 1.2, fontWeight: 700,
               fontFamily: "'JetBrains Mono', monospace",
               transition: 'all 0.2s',
             }}
@@ -307,9 +343,9 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
 
             {messages.map((msg, i) => {
               const isMe =
-                !!publicKey &&
-                (msg.fullSender === publicKey.toString() ||
-                  msg.sender === `${publicKey.toString().slice(0, 4)}…${publicKey.toString().slice(-4)}`)
+                !!address &&
+                (msg.fullSender === address ||
+                  msg.sender === `${address.slice(0, 4)}…${address.slice(-4)}`)
 
               return (
                 <div
@@ -407,8 +443,8 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
                         style={{
                           fontSize: 13,
                           color: spermTheme.textPrimary,
-                          background: isMe ? 'rgba(212,170,255,0.06)' : 'rgba(255,255,255,0.03)',
-                          border: `1px solid ${isMe ? 'rgba(212,170,255,0.2)' : spermTheme.borderChrome}`,
+                          background: isMe ? 'rgba(232,65,66,0.07)' : 'rgba(255,255,255,0.04)',
+                          border: `1px solid ${isMe ? 'rgba(232,65,66,0.22)' : spermTheme.borderChrome}`,
                           borderRadius: isMe ? '8px 2px 8px 8px' : '2px 8px 8px 8px',
                           padding: '8px 12px',
                           wordBreak: 'break-word',
@@ -523,9 +559,9 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={publicKey ? 'Say something…' : 'Connect wallet'}
+              placeholder={address ? 'Say something…' : 'Connect wallet'}
               maxLength={200}
-              disabled={!publicKey}
+              disabled={!address}
               style={{
                 flex: 1,
                 minWidth: 0,
@@ -536,14 +572,14 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
                 color: RAIL_COLORS.text,
                 fontSize: 12,
                 outline: 'none',
-                opacity: publicKey ? 1 : 0.5,
+                opacity: address ? 1 : 0.5,
               }}
             />
 
             <button
               type="button"
               onClick={() => setShowGifPicker((open) => !open)}
-              disabled={!publicKey}
+              disabled={!address}
               style={{
                 background: showGifPicker ? spermTheme.accentSoft : 'rgba(255,255,255,0.06)',
                 border: `1px solid ${showGifPicker ? spermTheme.accentBorder : 'rgba(255,255,255,0.16)'}`,
@@ -557,7 +593,7 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                opacity: publicKey ? 1 : 0.4,
+                opacity: address ? 1 : 0.4,
               }}
             >
               <ImageIcon size={16} />
@@ -565,24 +601,23 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
 
             <button
               type="submit"
-              disabled={!publicKey}
+              disabled={!address}
               style={{
-                background: spermTheme.accentSoft,
-                border: `1px solid ${spermTheme.accentBorder}`,
+                background: address ? 'linear-gradient(135deg, #E84142, #FF5A5F)' : 'rgba(255,255,255,0.05)',
+                border: 'none',
                 borderRadius: 8,
                 padding: '8px',
-                width: 36,
-                height: 36,
+                width: 36, height: 36,
                 flexShrink: 0,
-                color: RAIL_COLORS.accent,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: publicKey ? 1 : 0.4,
+                color: '#fff',
+                cursor: address ? 'pointer' : 'not-allowed',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                opacity: address ? 1 : 0.35,
+                boxShadow: address ? '0 2px 10px rgba(232,65,66,0.30)' : 'none',
+                transition: 'all 0.15s ease',
               }}
             >
-              <Send size={16} />
+              <Send size={15} />
             </button>
           </form>
         </div>
@@ -604,17 +639,17 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
             sortedLeaderboard.map((entry, i) => {
               const profit = entry.totalPayout - entry.totalBet
               const isMe =
-                !!publicKey &&
-                (entry.address === publicKey.toString() ||
-                  entry.shortAddr === `${publicKey.toString().slice(0, 4)}…${publicKey.toString().slice(-4)}`)
+                !!address &&
+                (entry.address === address ||
+                  entry.shortAddr === `${address.slice(0, 4)}…${address.slice(-4)}`)
               const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null
 
               return (
                 <div
                   key={entry.address}
                   style={{
-                    background: isMe ? spermTheme.accentSoft : 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${isMe ? spermTheme.accentBorder : 'rgba(255,255,255,0.12)'}`,
+                    background: isMe ? 'rgba(232,65,66,0.08)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${isMe ? 'rgba(232,65,66,0.25)' : 'rgba(255,255,255,0.08)'}`,
                     borderRadius: 8,
                     padding: '8px 10px',
                     display: 'flex',
@@ -654,6 +689,69 @@ export default function ChatSidebar({ leaderboard }: ChatSidebarProps) {
                 </div>
               )
             })
+          )}
+        </div>
+      )}
+
+      {tab === 'trades' && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {!address ? (
+            <div style={{ textAlign: 'center', marginTop: 40, color: RAIL_COLORS.textDim, fontSize: 11 }}>
+              Connect wallet to see your trades
+            </div>
+          ) : transactionsLoading && transactions.length === 0 ? (
+            <div style={{ textAlign: 'center', marginTop: 40, color: RAIL_COLORS.textDim, fontSize: 11 }}>
+              Loading your activity…
+            </div>
+          ) : transactions.length === 0 ? (
+            <div style={{ textAlign: 'center', marginTop: 40, color: RAIL_COLORS.textDim, fontSize: 11 }}>
+              No trades found for this session
+            </div>
+          ) : (
+            transactions.slice(0, 50).map((tx) => (
+              <div
+                key={tx.id}
+                style={{
+                  background: tx.won ? 'rgba(152,214,194,0.06)' : 'rgba(232,65,66,0.04)',
+                  border: `1px solid ${tx.won ? 'rgba(152,214,194,0.18)' : 'rgba(232,65,66,0.12)'}`,
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  display: 'grid',
+                  gap: 3,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 900,
+                      color: tx.won ? spermTheme.success : spermTheme.error,
+                      letterSpacing: 0.8,
+                    }}
+                  >
+                    {tx.won ? 'WIN' : 'LOSS'}
+                  </span>
+                  <span style={{ fontSize: 9, color: RAIL_COLORS.textDim }}>
+                    {new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <div style={{ fontSize: 12, color: spermTheme.textSecondary }}>
+                    {tx.betAmount.toFixed(1)} → <span style={{ color: spermTheme.textPrimary, fontWeight: 700 }}>{tx.payout.toFixed(1)}</span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 900,
+                      color: tx.net >= 0 ? spermTheme.success : spermTheme.error,
+                    }}
+                  >
+                    {tx.net >= 0 ? '+' : ''}
+                    {tx.net.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+            ))
           )}
         </div>
       )}

@@ -10,41 +10,52 @@ interface MultEntry {
   timestamp: number;
 }
 
-// Color scheme based on multiplier value
+// Color scheme based on multiplier value — AVAX theme
 function getMultStyle(mult: number): {
   bg: string;
   border: string;
   text: string;
+  glow?: string;
 } {
   if (mult >= 10) {
-    // Golden/yellow for 10x+
+    // Gold — legendary
     return {
-      bg: "rgba(255,200,80,0.18)",
-      border: "rgba(255,200,80,0.55)",
-      text: "rgba(255,210,100,0.95)",
+      bg: "rgba(245,158,11,0.15)",
+      border: "rgba(245,158,11,0.50)",
+      text: "#F59E0B",
+      glow: "0 0 8px rgba(245,158,11,0.25)",
     };
   }
-  if (mult >= 3) {
-    // Green for 3-10x
+  if (mult >= 5) {
+    // AVAX Red — big win
     return {
-      bg: "rgba(140,220,180,0.14)",
-      border: "rgba(140,220,180,0.45)",
-      text: "rgba(150,230,190,0.92)",
+      bg: "rgba(232,65,66,0.14)",
+      border: "rgba(232,65,66,0.50)",
+      text: "#FF5A5F",
+      glow: "0 0 8px rgba(232,65,66,0.20)",
+    };
+  }
+  if (mult >= 2) {
+    // Soft red — solid win
+    return {
+      bg: "rgba(232,65,66,0.08)",
+      border: "rgba(232,65,66,0.30)",
+      text: "rgba(255,120,121,0.92)",
     };
   }
   if (mult >= 1.5) {
-    // Purple for 1.5-3x
+    // Green — small win
     return {
-      bg: "rgba(197,140,255,0.14)",
-      border: "rgba(197,140,255,0.45)",
-      text: "rgba(210,170,255,0.92)",
+      bg: "rgba(16,185,129,0.10)",
+      border: "rgba(16,185,129,0.30)",
+      text: "rgba(52,211,153,0.90)",
     };
   }
-  // Gray/dim for below 1.5x
+  // Dim — near-bust
   return {
-    bg: "rgba(245,245,242,0.06)",
-    border: "rgba(245,245,242,0.18)",
-    text: "rgba(245,245,242,0.60)",
+    bg: "rgba(255,255,255,0.04)",
+    border: "rgba(255,255,255,0.10)",
+    text: "rgba(155,163,175,0.70)",
   };
 }
 
@@ -91,58 +102,61 @@ export default function MultiplierBar() {
       ref={scrollRef}
       style={{
         display: "flex",
-        gap: 6,
-        padding: "8px 12px",
+        alignItems: "center",
+        gap: 5,
+        padding: "7px 12px",
         overflowX: "auto",
         overflowY: "hidden",
         scrollbarWidth: "none",
         msOverflowStyle: "none",
-        background: "rgba(0,0,0,0.32)",
-        borderBottom: `1px solid ${spermTheme.borderSoft}`,
-        borderRadius: "20px 20px 0 0",
+        background: "transparent",
       }}
       className="multiplier-bar-scroll"
     >
       <style>{`
         .multiplier-bar-scroll::-webkit-scrollbar { display: none; }
       `}</style>
-      {/* Shield icon at start */}
+      {/* Label */}
       <div
         style={{
           flexShrink: 0,
-          width: 28,
-          height: 28,
-          borderRadius: 8,
-          background: "rgba(245,245,242,0.06)",
-          border: "1px solid rgba(245,245,242,0.14)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "rgba(245,245,242,0.50)",
-          fontSize: 14,
+          fontSize: 9,
+          fontWeight: 700,
+          letterSpacing: 1.5,
+          color: "rgba(155,163,175,0.5)",
+          fontFamily: "'JetBrains Mono', monospace",
+          textTransform: "uppercase",
+          marginRight: 4,
+          whiteSpace: "nowrap",
         }}
       >
-        ◇
+        HISTORY
       </div>
+      {/* Divider */}
+      <div style={{ flexShrink: 0, width: 1, height: 16, background: "rgba(255,255,255,0.08)", marginRight: 4 }} />
+
       {reversed.map((entry, i) => {
-        const style = getMultStyle(entry.multiplier);
+        const s = getMultStyle(entry.multiplier);
         return (
           <div
             key={`${entry.colX}-${i}`}
             style={{
               flexShrink: 0,
-              padding: "5px 12px",
-              borderRadius: 8,
-              background: style.bg,
-              border: `1px solid ${style.border}`,
-              color: style.text,
-              fontSize: 12,
-              fontWeight: 600,
-              letterSpacing: 0.3,
+              padding: "4px 10px",
+              borderRadius: 6,
+              background: s.bg,
+              border: `1px solid ${s.border}`,
+              color: s.text,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: 0.5,
               whiteSpace: "nowrap",
+              fontFamily: "'JetBrains Mono', monospace",
+              boxShadow: s.glow ?? "none",
+              animation: i === 0 ? "pill-in 0.25s ease" : "none",
             }}
           >
-            {entry.multiplier.toFixed(2)}x
+            {entry.multiplier.toFixed(2)}×
           </div>
         );
       })}

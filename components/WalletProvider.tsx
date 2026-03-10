@@ -63,7 +63,7 @@ export default function WalletContextProvider({ children }: { children: ReactNod
   const { address, isConnected } = useAccount()
   const chainId = useChainId()
   const publicClient = usePublicClient()
-  const { data: walletClient } = useWalletClient()
+  const { data: walletClient } = useWalletClient({ chainId: FUJI_CHAIN_ID })
   const { disconnect } = useDisconnect()
   const { switchChainAsync } = useSwitchChain()
   const { openConnectModal } = useConnectModal()

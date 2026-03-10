@@ -2,11 +2,11 @@ import { ethers } from 'ethers'
 
 const SESSION_KEY = 'sprmfun:session_evm_key'
 
-export function generateSessionWallet(): ethers.Wallet {
+export function generateSessionWallet(): ethers.HDNodeWallet {
   return ethers.Wallet.createRandom()
 }
 
-export function saveSessionWallet(wallet: ethers.Wallet): void {
+export function saveSessionWallet(wallet: ethers.Wallet | ethers.HDNodeWallet): void {
   if (typeof window === 'undefined') return
   localStorage.setItem(SESSION_KEY, wallet.privateKey)
 }

@@ -1,8 +1,10 @@
 "use client";
 
+export const dynamic = 'force-dynamic'
+
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useEvmWallet } from "@/components/WalletProvider";
 import TopHeader from "@/components/TopHeader";
 import LeftRail from "@/components/LeftRail";
 import GlobalChat from "@/components/GlobalChat";
@@ -13,6 +15,7 @@ import StatsTab from "@/components/profile/StatsTab";
 import TransferTab from "@/components/profile/TransferTab";
 import TransactionsTab from "@/components/profile/TransactionsTab";
 import SettingsTab from "@/components/profile/SettingsTab";
+import ReferralsTab from "@/components/profile/ReferralsTab";
 import {
   DUAL_PANEL_WIDTH,
   LEFT_RAIL_BREAKPOINT,
@@ -28,6 +31,7 @@ import { type ProfileTab } from "@/lib/profile/types";
 
 const allowedTabs: ProfileTab[] = [
   "stats",
+  "referrals",
   "transfer",
   "transactions",
   "settings",
@@ -42,13 +46,12 @@ function normalizeTab(value: string | null): ProfileTab {
 function ProfilePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { connected, publicKey, signMessage } = useWallet();
+  const { connected, address: walletAddress } = useEvmWallet();
   const session = useSessionWalletContext();
   // Start at 0 to avoid hydration mismatch; update after mount
   const [leftRailWidth, setLeftRailWidth] = useState(0);
 
-  const walletAddress = publicKey?.toBase58() ?? null;
-  const { balance: primarySprmBalance } = useSprmBalance(publicKey);
+  const { balance: primarySprmBalance } = useSprmBalance(walletAddress);
   const {
     settings,
     stats,
@@ -66,7 +69,7 @@ function ProfilePageContent() {
     saveSettings,
     settingsSaving,
     settingsError,
-  } = useProfileData(walletAddress, signMessage ?? undefined);
+  } = useProfileData(walletAddress);
 
   const tabParam = searchParams.get("tab");
   const activeTab = normalizeTab(tabParam);
@@ -125,6 +128,9 @@ function ProfilePageContent() {
           errorMessage={settingsError}
         />
       );
+    }
+    if (activeTab === "referrals") {
+      return <ReferralsTab settings={settings} loading={statsLoading} />;
     }
 
     return (
@@ -282,7 +288,7 @@ function ProfilePageContent() {
                 nickname={settings.nickname}
                 primarySprmBalance={primarySprmBalance}
                 sessionSprmBalance={session.sessionSprmBalance}
-                sessionSolBalance={session.sessionSolBalance}
+                sessionSolBalance={session.sessionAvaxBalance}
               />
 
               <ProfileTabs

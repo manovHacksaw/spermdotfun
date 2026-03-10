@@ -1,11 +1,11 @@
 import type { CSSProperties } from 'react'
 import { spermTheme } from '@/components/theme/spermTheme'
 
-export const TOP_HEADER_HEIGHT = 80
+export const TOP_HEADER_HEIGHT = 56
 export const MOBILE_BREAKPOINT = 640
 export const LEFT_RAIL_BREAKPOINT = 1200
-export const CHAT_PANEL_WIDTH = 280
-export const BET_PANEL_WIDTH = 300
+export const CHAT_PANEL_WIDTH = 272
+export const BET_PANEL_WIDTH = 296
 export const SINGLE_PANEL_WIDTH = 300
 export const DUAL_PANEL_WIDTH = CHAT_PANEL_WIDTH + BET_PANEL_WIDTH
 
@@ -33,9 +33,9 @@ export const RAIL_COLORS = {
   green: spermTheme.success,
   text: spermTheme.textPrimary,
   textDim: spermTheme.textTertiary,
-  panelBg: spermTheme.bgChrome,
-  tabBg: spermTheme.bgChromeSoft,
-  tabActiveBg: 'rgba(255,255,255,0.08)',
+  panelBg: spermTheme.bgCard,
+  tabBg: spermTheme.bgCard,
+  tabActiveBg: 'rgba(232,65,66,0.10)',
 }
 
 export const panelFrameStyle: CSSProperties = {

@@ -16,6 +16,8 @@ const DEFAULT_SETTINGS: ProfileSettings = {
   clientSeed: '',
   referralCode: '',
   volume: 35,
+  referredBy: null,
+  referralEarned: 0,
 }
 
 function makeDefaultStore(): WalletProfileStoreV1 {
@@ -66,6 +68,8 @@ function normalizeSettings(value: unknown): ProfileSettings {
     clientSeed: toSafeString(input.clientSeed, 120),
     referralCode: toSafeString(input.referralCode, 120),
     volume: normalizeVolume(input.volume),
+    referredBy: typeof input.referredBy === 'string' ? input.referredBy : null,
+    referralEarned: typeof input.referralEarned === 'number' ? input.referralEarned : 0,
   }
 }
 

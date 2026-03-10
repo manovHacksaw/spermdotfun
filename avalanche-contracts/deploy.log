@@ -1,0 +1,141 @@
+No files changed, compilation skipped
+Traces:
+  [2493387] DeploySimple::run()
+    ├─ [0] VM::envUint("PRIVATE_KEY") [staticcall]
+    │   └─ ← [Return] <env var value>
+    ├─ [0] VM::addr(<pk>) [staticcall]
+    │   └─ ← [Return] 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2
+    ├─ [0] VM::envOr("TREASURY_ADDRESS", 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2) [staticcall]
+    │   └─ ← [Return] <env var value>
+    ├─ [0] VM::envOr("RESOLVER_SIGNER", 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2) [staticcall]
+    │   └─ ← [Return] <env var value>
+    ├─ [0] VM::envOr("HOUSE_EDGE_BPS", 200) [staticcall]
+    │   └─ ← [Return] <env var value>
+    ├─ [0] VM::envOr("HOUSE_BANK_FUND", 1000000000000000000000000 [1e24]) [staticcall]
+    │   └─ ← [Return] <env var value>
+    ├─ [0] VM::startBroadcast(<pk>)
+    │   └─ ← [Return]
+    ├─ [687913] → new SprmToken@0x9a30294499b8784b80096b6C6Dd87456972eCA70
+    │   ├─ emit RoleGranted(role: 0x0000000000000000000000000000000000000000000000000000000000000000, account: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, sender: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    │   ├─ emit RoleGranted(role: 0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6, account: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, sender: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    │   └─ ← [Return] 2966 bytes of code
+    ├─ [0] console::log("SprmToken  :", SprmToken: [0x9a30294499b8784b80096b6C6Dd87456972eCA70]) [staticcall]
+    │   └─ ← [Stop]
+    ├─ [345249] → new SprmFaucet@0x50fEF1bCA8686302ca7Dac9D596aF121A288855B
+    │   ├─ emit OwnershipTransferred(previousOwner: 0x0000000000000000000000000000000000000000, newOwner: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    │   └─ ← [Return] 1384 bytes of code
+    ├─ [517] SprmToken::MINTER_ROLE() [staticcall]
+    │   └─ ← [Return] 0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6
+    ├─ [27238] SprmToken::grantRole(0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6, SprmFaucet: [0x50fEF1bCA8686302ca7Dac9D596aF121A288855B])
+    │   ├─ emit RoleGranted(role: 0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6, account: SprmFaucet: [0x50fEF1bCA8686302ca7Dac9D596aF121A288855B], sender: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    │   └─ ← [Stop]
+    ├─ [0] console::log("SprmFaucet :", SprmFaucet: [0x50fEF1bCA8686302ca7Dac9D596aF121A288855B]) [staticcall]
+    │   └─ ← [Stop]
+    ├─ [1191525] → new SprmGameSimple@0x2327D3611694ead7Bff9075eCc362dc982926d3C
+    │   ├─ emit OwnershipTransferred(previousOwner: 0x0000000000000000000000000000000000000000, newOwner: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    │   └─ ← [Return] 5498 bytes of code
+    ├─ [517] SprmToken::MINTER_ROLE() [staticcall]
+    │   └─ ← [Return] 0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6
+    ├─ [25238] SprmToken::grantRole(0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6, SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C])
+    │   ├─ emit RoleGranted(role: 0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6, account: SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C], sender: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    │   └─ ← [Stop]
+    ├─ [46827] SprmToken::mint(0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, 1000000000000000000000000 [1e24])
+    │   ├─ emit Transfer(from: 0x0000000000000000000000000000000000000000, to: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, value: 1000000000000000000000000 [1e24])
+    │   └─ ← [Stop]
+    ├─ [24361] SprmToken::approve(SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C], 1000000000000000000000000 [1e24])
+    │   ├─ emit Approval(owner: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, spender: SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C], value: 1000000000000000000000000 [1e24])
+    │   └─ ← [Return] true
+    ├─ [27479] SprmGameSimple::fundHouseBank(1000000000000000000000000 [1e24])
+    │   ├─ [25442] SprmToken::transferFrom(0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C], 1000000000000000000000000 [1e24])
+    │   │   ├─ emit Transfer(from: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, to: SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C], value: 1000000000000000000000000 [1e24])
+    │   │   └─ ← [Return] true
+    │   ├─ emit HouseBankFunded(funder: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, amount: 1000000000000000000000000 [1e24])
+    │   └─ ← [Stop]
+    ├─ [0] console::log("SprmGame   :", SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C]) [staticcall]
+    │   └─ ← [Stop]
+    ├─ [0] console::log("Treasury   :", 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2) [staticcall]
+    │   └─ ← [Stop]
+    ├─ [0] console::log("Resolver   :", 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2) [staticcall]
+    │   └─ ← [Stop]
+    ├─ [0] console::log("HouseEdge  :", 200, "bps") [staticcall]
+    │   └─ ← [Stop]
+    ├─ [0] console::log("HouseBank  :", 1000000 [1e6], "SPRM") [staticcall]
+    │   └─ ← [Stop]
+    ├─ [0] VM::stopBroadcast()
+    │   └─ ← [Return]
+    └─ ← [Return]
+
+
+Script ran successfully.
+
+== Logs ==
+  SprmToken  : 0x9a30294499b8784b80096b6C6Dd87456972eCA70
+  SprmFaucet : 0x50fEF1bCA8686302ca7Dac9D596aF121A288855B
+  SprmGame   : 0x2327D3611694ead7Bff9075eCc362dc982926d3C
+  Treasury   : 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2
+  Resolver   : 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2
+  HouseEdge  : 200 bps
+  HouseBank  : 1000000 SPRM
+
+## Setting up 1 EVM.
+==========================
+Simulated On-chain Traces:
+
+  [687913] → new SprmToken@0x9a30294499b8784b80096b6C6Dd87456972eCA70
+    ├─ emit RoleGranted(role: 0x0000000000000000000000000000000000000000000000000000000000000000, account: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, sender: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    ├─ emit RoleGranted(role: 0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6, account: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, sender: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    └─ ← [Return] 2966 bytes of code
+
+  [345249] → new SprmFaucet@0x50fEF1bCA8686302ca7Dac9D596aF121A288855B
+    ├─ emit OwnershipTransferred(previousOwner: 0x0000000000000000000000000000000000000000, newOwner: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    └─ ← [Return] 1384 bytes of code
+
+  [29238] SprmToken::grantRole(0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6, SprmFaucet: [0x50fEF1bCA8686302ca7Dac9D596aF121A288855B])
+    ├─ emit RoleGranted(role: 0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6, account: SprmFaucet: [0x50fEF1bCA8686302ca7Dac9D596aF121A288855B], sender: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    └─ ← [Stop]
+
+  [1191525] → new SprmGameSimple@0x2327D3611694ead7Bff9075eCc362dc982926d3C
+    ├─ emit OwnershipTransferred(previousOwner: 0x0000000000000000000000000000000000000000, newOwner: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    └─ ← [Return] 5498 bytes of code
+
+  [29238] SprmToken::grantRole(0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6, SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C])
+    ├─ emit RoleGranted(role: 0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6, account: SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C], sender: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2)
+    └─ ← [Stop]
+
+  [48827] SprmToken::mint(0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, 1000000000000000000000000 [1e24])
+    ├─ emit Transfer(from: 0x0000000000000000000000000000000000000000, to: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, value: 1000000000000000000000000 [1e24])
+    └─ ← [Stop]
+
+  [24361] SprmToken::approve(SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C], 1000000000000000000000000 [1e24])
+    ├─ emit Approval(owner: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, spender: SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C], value: 1000000000000000000000000 [1e24])
+    └─ ← [Return] true
+
+  [39579] SprmGameSimple::fundHouseBank(1000000000000000000000000 [1e24])
+    ├─ [35042] SprmToken::transferFrom(0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C], 1000000000000000000000000 [1e24])
+    │   ├─ emit Transfer(from: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, to: SprmGameSimple: [0x2327D3611694ead7Bff9075eCc362dc982926d3C], value: 1000000000000000000000000 [1e24])
+    │   └─ ← [Return] true
+    ├─ emit HouseBankFunded(funder: 0x2D4575003f6017950C2f7a10aFb17bf2fBb648d2, amount: 1000000000000000000000000 [1e24])
+    └─ ← [Stop]
+
+
+==========================
+
+Chain 43113
+
+Estimated gas price: 0.000000004 gwei
+
+Estimated total gas used for script: 3721233
+
+Estimated amount required: 0.000000000014884932 ETH
+
+==========================
+
+
+==========================
+
+ONCHAIN EXECUTION COMPLETE & SUCCESSFUL.
+
+Transactions saved to: /home/manov/Desktop/code/sprmfunv2/avalanche-contracts/broadcast/DeploySimple.s.sol/43113/run-latest.json
+
+Sensitive values saved to: /home/manov/Desktop/code/sprmfunv2/avalanche-contracts/cache/DeploySimple.s.sol/43113/run-latest.json
+

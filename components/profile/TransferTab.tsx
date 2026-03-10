@@ -1,17 +1,17 @@
 "use client";
 
 import { useMemo, useState, type CSSProperties } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useEvmWallet } from "@/components/WalletProvider";
 import { useSessionWalletContext } from "@/context/SessionWalletContext";
 import { useSprmBalance } from "@/hooks/useSprmBalance";
 import { spermTheme } from "@/components/theme/spermTheme";
 
-const MIN_SESSION_SOL = 0.0025;
-const TARGET_SESSION_SOL = 0.005;
-const SOL_TOPUP_AMOUNT = 0.02; // ~6–7 bets worth of fees
+const MIN_SESSION_AVAX = 0.0025;
+const TARGET_SESSION_AVAX = 0.005;
+const AVAX_TOPUP_AMOUNT = 0.02; // ~6–7 bets worth of fees
 
 export default function TransferTab() {
-  const { publicKey } = useWallet();
+  const { address: publicKey } = useEvmWallet();
   const session = useSessionWalletContext();
   const { balance: primarySprmBalance } = useSprmBalance(publicKey);
 
@@ -21,26 +21,26 @@ export default function TransferTab() {
     "idle" | "pending" | "done" | "error"
   >("idle");
 
-  const sessionSol = session.sessionSolBalance ?? 0;
-  const autoSolTopUp = useMemo(() => {
+  const sessionAvax = session.sessionAvaxBalance ?? 0;
+  const autoAvaxTopUp = useMemo(() => {
     if (!session.isActive) return 0;
-    if (sessionSol >= MIN_SESSION_SOL) return 0;
-    return Math.max(0, TARGET_SESSION_SOL - sessionSol);
-  }, [session.isActive, sessionSol]);
+    if (sessionAvax >= MIN_SESSION_AVAX) return 0;
+    return Math.max(0, TARGET_SESSION_AVAX - sessionAvax);
+  }, [session.isActive, sessionAvax]);
 
-  const solIsLow = session.isActive && sessionSol < MIN_SESSION_SOL;
+  const avaxIsLow = session.isActive && sessionAvax < MIN_SESSION_AVAX;
 
   const onDeposit = async () => {
     const amount = Math.max(0, Number(depositSprm || 0));
     if (amount <= 0) return;
-    setLastAutoTopUp(autoSolTopUp);
-    await session.deposit(amount, autoSolTopUp);
+    setLastAutoTopUp(autoAvaxTopUp);
+    await session.deposit(amount);
   };
 
-  const onTopUpSol = async () => {
+  const onTopUpAvax = async () => {
     setSolTopUpStatus("pending");
     try {
-      await session.deposit(0, SOL_TOPUP_AMOUNT);
+      await session.deposit(0);
       setSolTopUpStatus("done");
       setTimeout(() => setSolTopUpStatus("idle"), 3000);
     } catch {
@@ -142,8 +142,8 @@ export default function TransferTab() {
           </div>
           <div
             style={balanceCard(
-              solIsLow ? "rgba(227,150,170,0.10)" : "rgba(197,140,255,0.12)",
-              solIsLow ? "rgba(227,150,170,0.45)" : "rgba(197,140,255,0.32)",
+              avaxIsLow ? "rgba(227,150,170,0.10)" : "rgba(197,140,255,0.12)",
+              avaxIsLow ? "rgba(227,150,170,0.45)" : "rgba(197,140,255,0.32)",
             )}
           >
             <div style={balanceLabel}>Insta Wallet</div>
@@ -161,25 +161,25 @@ export default function TransferTab() {
             >
               <div
                 style={{
-                  color: solIsLow ? spermTheme.error : spermTheme.textSecondary,
+                  color: avaxIsLow ? spermTheme.error : spermTheme.textSecondary,
                   fontSize: 12,
                 }}
               >
-                {solIsLow ? "⚠ " : ""}
-                {(session.sessionSolBalance ?? 0).toFixed(5)} SOL{" "}
-                {solIsLow ? "— low fees!" : "for fees"}
+                {avaxIsLow ? "⚠ " : ""}
+                {(session.sessionAvaxBalance ?? 0).toFixed(5)} AVAX{" "}
+                {avaxIsLow ? "— low fees!" : "for fees"}
               </div>
               {session.isActive && (
                 <button
-                  onClick={onTopUpSol}
+                  onClick={onTopUpAvax}
                   disabled={solTopUpStatus === "pending"}
-                  title={`Send ${SOL_TOPUP_AMOUNT} SOL from main wallet for tx fees (~0.003 SOL per bet)`}
+                  title={`Send ${AVAX_TOPUP_AMOUNT} AVAX from main wallet for tx fees`}
                   style={{
-                    border: `1px solid ${solIsLow ? spermTheme.error : spermTheme.accentBorder}`,
-                    background: solIsLow
+                    border: `1px solid ${avaxIsLow ? spermTheme.error : spermTheme.accentBorder}`,
+                    background: avaxIsLow
                       ? "rgba(227,150,170,0.18)"
                       : spermTheme.accentSoft,
-                    color: solIsLow ? spermTheme.error : spermTheme.accent,
+                    color: avaxIsLow ? spermTheme.error : spermTheme.accent,
                     borderRadius: 8,
                     padding: "3px 10px",
                     fontSize: 11,
@@ -192,7 +192,7 @@ export default function TransferTab() {
                     ? "Sending…"
                     : solTopUpStatus === "done"
                       ? "✓ Sent"
-                      : `+ ${SOL_TOPUP_AMOUNT} SOL`}
+                      : `+ ${AVAX_TOPUP_AMOUNT} AVAX`}
                 </button>
               )}
             </div>
@@ -203,8 +203,7 @@ export default function TransferTab() {
                 marginTop: 4,
               }}
             >
-              ~0.003 SOL per bet · {SOL_TOPUP_AMOUNT} SOL ≈{" "}
-              {Math.floor(SOL_TOPUP_AMOUNT / 0.003)} bets
+              {AVAX_TOPUP_AMOUNT} AVAX for gas fees
             </div>
           </div>
         </div>
@@ -275,16 +274,16 @@ export default function TransferTab() {
               </button>
             </div>
 
-            {autoSolTopUp > 0 && (
+            {autoAvaxTopUp > 0 && (
               <div style={{ color: spermTheme.textSecondary, fontSize: 13 }}>
-                Auto fee top-up enabled: +{autoSolTopUp.toFixed(5)} SOL will be
+                Auto fee top-up enabled: +{autoAvaxTopUp.toFixed(5)} AVAX will be
                 added for smooth session betting.
               </div>
             )}
 
             {lastAutoTopUp > 0 && session.depositStatus === "done" && (
               <div style={{ color: spermTheme.textSecondary, fontSize: 13 }}>
-                Last deposit included {lastAutoTopUp.toFixed(5)} SOL fee top-up.
+                Last deposit included {lastAutoTopUp.toFixed(5)} AVAX fee top-up.
               </div>
             )}
 
@@ -350,7 +349,7 @@ export default function TransferTab() {
             <span style={{ fontWeight: 800 }}>SPRM</span>
             <span style={{ color: spermTheme.textPrimary }}>Enabled</span>
           </button>
-          {["SOL", "USDC", "BONK"].map((symbol) => (
+          {["AVAX", "USDC", "USDT"].map((symbol) => (
             <button
               key={symbol}
               disabled
