@@ -1,6 +1,6 @@
 'use client'
 
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
+import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { spermTheme } from '@/components/theme/spermTheme'
 
 export default function ConnectGate() {
@@ -73,18 +73,7 @@ export default function ConnectGate() {
           Your stats, transfer history, profile settings, and linked session-wallet data are scoped to the active wallet address.
         </p>
 
-        <WalletMultiButton
-          style={{
-            background: spermTheme.accentSoft,
-            border: `1px solid ${spermTheme.accentBorder}`,
-            borderRadius: 14,
-            fontSize: 15,
-            height: 52,
-            padding: '0 24px',
-            fontFamily: 'inherit',
-            fontWeight: 800,
-          }}
-        />
+        <ConnectButton />
       </div>
     </div>
   )

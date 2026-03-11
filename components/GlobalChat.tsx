@@ -2,72 +2,30 @@
 
 import { useState, useEffect, useRef } from 'react'
 import PubNub from 'pubnub'
-import { useWallet, useConnection } from '@solana/wallet-adapter-react'
+import { useAccount } from 'wagmi'
 import { MessageSquare, X, Send } from 'lucide-react'
-import { PublicKey } from '@solana/web3.js'
-import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { getOrCreateUsername, getUsernameMap, deriveUsername } from '@/lib/username'
 import { spermTheme } from '@/components/theme/spermTheme'
 
 interface ChatMessage {
   text: string
   sender: string       // short display (e.g. "Ab12…XYZw") — kept for legacy
-  fullSender: string   // full pubkey string for balance lookup
+  fullSender: string   // full address string
   username?: string    // generated random name, e.g. "NeonWolf4823"
   timestamp: number
 }
-
-// SPRM mint PDA (mirrors GameHUD constants)
-const STATE_SEED = Buffer.from('state')
-const MINT_SEED = Buffer.from('mint')
-const PROGRAM_ID = new PublicKey('AouUDBc5RzydyxEUtrH3nf65ZMeZxxVgMzG4cUat8Cd6')
-const [statePda] = PublicKey.findProgramAddressSync([STATE_SEED], PROGRAM_ID)
-const [mintPda] = PublicKey.findProgramAddressSync([MINT_SEED, statePda.toBuffer()], PROGRAM_ID)
-const DECIMALS = 9
 
 const PUBLISH_KEY = process.env.NEXT_PUBLIC_PUBNUB_PUBLISH_KEY || ''
 const SUBSCRIBE_KEY = process.env.NEXT_PUBLIC_PUBNUB_SUBSCRIBE_KEY || ''
 const CHANNEL = 'sprmfun-global-chat'
 
 export default function GlobalChat() {
-  const { publicKey } = useWallet()
-  const { connection } = useConnection()
+  const { address } = useAccount()
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [pubnub, setPubnub] = useState<PubNub | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-
-  // hover tooltip: { address, balance | null, loading }
-  const [tooltip, setTooltip] = useState<{ address: string; balance: number | null; loading: boolean } | null>(null)
-  const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  async function fetchSprmBalance(address: string): Promise<number | null> {
-    try {
-      const owner = new PublicKey(address)
-      const ata = getAssociatedTokenAddressSync(mintPda, owner)
-      const info = await connection.getTokenAccountBalance(ata)
-      return parseFloat(info.value.uiAmountString ?? '0')
-    } catch { return null }
-  }
-
-  function handleSenderMouseEnter(fullSender: string) {
-    if (tooltipTimer.current) clearTimeout(tooltipTimer.current)
-    // Old messages only have the short display address — can't look up balance
-    const isShort = fullSender.includes('…') || fullSender.length < 32
-    if (isShort) {
-      setTooltip({ address: fullSender, balance: null, loading: false })
-      return
-    }
-    setTooltip({ address: fullSender, balance: null, loading: true })
-    fetchSprmBalance(fullSender).then(balance => {
-      setTooltip(t => t?.address === fullSender ? { address: fullSender, balance, loading: false } : t)
-    })
-  }
-
-  function handleSenderMouseLeave() {
-    tooltipTimer.current = setTimeout(() => setTooltip(null), 200)
-  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -78,7 +36,7 @@ export default function GlobalChat() {
     const pn = new PubNub({
       publishKey: PUBLISH_KEY,
       subscribeKey: SUBSCRIBE_KEY,
-      uuid: publicKey?.toString() || `anon-${Date.now()}`,
+      uuid: address || `anon-${Date.now()}`,
     })
     setPubnub(pn)
     pn.subscribe({ channels: [CHANNEL] })
@@ -94,12 +52,12 @@ export default function GlobalChat() {
       },
     })
     return () => { pn.unsubscribe({ channels: [CHANNEL] }) }
-  }, [publicKey])
+  }, [address])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || !pubnub) return
-    const addrStr = publicKey?.toString() ?? ''
+    const addrStr = address ?? ''
     const shortAddr = addrStr ? `${addrStr.slice(0, 4)}…${addrStr.slice(-4)}` : 'Anon'
     const username = addrStr ? getOrCreateUsername(addrStr) : 'Anon'
     pubnub.publish({
@@ -185,27 +143,13 @@ export default function GlobalChat() {
                   const displayName = msg.username
                     || storedMap[msg.fullSender]
                     || (isFullAddr ? deriveUsername(msg.fullSender) : msg.sender)
-                  const isMe = publicKey && (msg.fullSender === publicKey.toString() || msg.sender === `${publicKey.toString().slice(0, 4)}…${publicKey.toString().slice(-4)}`)
+                  const isMe = address && (msg.fullSender === address || msg.sender === `${address.slice(0, 4)}…${address.slice(-4)}`)
                   return (
                     <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: isMe ? 'flex-end' : 'flex-start' }}>
                       <span
-                        onMouseEnter={() => handleSenderMouseEnter(msg.fullSender)}
-                        onMouseLeave={handleSenderMouseLeave}
-                        style={{ fontSize: 10, color: isMe ? spermTheme.accent : spermTheme.textTertiary, fontWeight: 700, cursor: 'default', position: 'relative', display: 'inline-block' }}
+                        style={{ fontSize: 10, color: isMe ? spermTheme.accent : spermTheme.textTertiary, fontWeight: 700, cursor: 'default' }}
                       >
                         {isMe ? 'YOU' : displayName}
-                        {tooltip?.address === msg.fullSender && (
-                          <span style={{
-                            position: 'absolute', bottom: '100%', left: isMe ? 'auto' : 0, right: isMe ? 0 : 'auto', marginBottom: 4,
-                            background: 'rgba(10,8,20,0.97)',
-                            border: `1px solid ${spermTheme.accentBorder}`,
-                            borderRadius: 6, padding: '4px 8px',
-                            fontSize: 11, color: spermTheme.textPrimary,
-                            whiteSpace: 'nowrap', zIndex: 300, pointerEvents: 'none',
-                          }}>
-                            {tooltip?.loading ? 'Loading…' : tooltip?.balance !== null ? `${tooltip?.balance?.toFixed(2)} SPRM` : (tooltip?.address?.includes('…') ? 'Address unavailable' : 'No SPRM account')}
-                          </span>
-                        )}
                       </span>
                       <span style={{
                         fontSize: 12, color: spermTheme.textPrimary,
