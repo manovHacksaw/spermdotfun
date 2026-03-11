@@ -1,20 +1,45 @@
+# ── Dependencies ──────────────────────────────────────────────────────────────
 node_modules/
-.claude/
+.yarn/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# ── Next.js ───────────────────────────────────────────────────────────────────
 .next/
+out/
+next-env.d.ts
+tsconfig.tsbuildinfo
 
-.anchor
-.DS_Store
+# ── Build outputs ─────────────────────────────────────────────────────────────
+dist/
+build/
 
-**/*.rs.bk
-node_modules
-test-ledger
-.yarn
-.env*
-wallet.zip
-.local-postgres/
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+anvil.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-.agents/
-.agent/
-_agents/
-_agent/
+
+# ── Solidity / Hardhat / Foundry ──────────────────────────────────────────────
+avalanche-contracts/cache/
+avalanche-contracts/artifacts/
+avalanche-contracts/typechain-types/
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+test-ledger/
+.local-postgres/
+coverage/
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+wallet.zip
+doc.tx
+**/*.rs.bk
