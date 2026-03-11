@@ -48,7 +48,13 @@ export function useLiveGameStats(): UseLiveGameStatsResult {
 
     const connect = () => {
       if (unmounted) return
-      ws = new WebSocket(process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3000')
+      const getWsUrl = () => {
+        if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.hostname === 'localhost' ? 'localhost:3000' : window.location.host;
+        return `${protocol}//${host}`;
+      };
+      ws = new WebSocket(getWsUrl())
 
       ws.onmessage = (evt) => {
         try {
