@@ -20,6 +20,8 @@ const state = {
   // Market pause
   bettingPaused: false,
   houseBankBalance: 0,
+  lastFeedError: null,
+  restAttempts: 0,
 
   // Physics simulation
   simY: 0.0,

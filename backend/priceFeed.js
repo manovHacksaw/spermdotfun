@@ -8,12 +8,19 @@ const { state, broadcast } = require('./state');
 
 // ── REST fallback — poll Binance HTTP API ─────────────────────────────────────
 function fetchPriceRest() {
+  state.restAttempts++;
   const url = 'https://api.binance.com/api/v3/ticker/price?symbol=AVAXUSDT';
   const options = {
-    headers: { 'User-Agent': 'Mozilla/5.0 (SPRMFUN-Server)' }
+    headers: { 'User-Agent': 'Mozilla/5.0 (SPRMFUN-Server)' },
+    timeout: 5000
   };
-  https.get(url, options, (res) => {
+
+  const req = https.get(url, options, (res) => {
     let body = '';
+    if (res.statusCode !== 200) {
+      state.lastFeedError = `REST HTTP ${res.statusCode}`;
+      return;
+    }
     res.on('data', chunk => { body += chunk; });
     res.on('end', () => {
       try {
@@ -21,16 +28,25 @@ function fetchPriceRest() {
         if (price > 0) {
           state.currentAvaxPrice = price;
           state.lastPriceTick = Date.now();
+          state.lastFeedError = null; // Clear on success
           if (state.priceBaseline === 0) {
             state.priceBaseline = price;
-            console.log(`[BINANCE] REST initial price: $${price}`);
           }
         }
       } catch (e) {
-        console.error('[BINANCE] REST parse error', e.message);
+        state.lastFeedError = `REST Parse Error: ${e.message}`;
       }
     });
-  }).on('error', (e) => console.error('[BINANCE] REST fetch error', e.message));
+  });
+
+  req.on('error', (e) => {
+    state.lastFeedError = `REST Request Error: ${e.message}`;
+  });
+
+  req.on('timeout', () => {
+    req.destroy();
+    state.lastFeedError = 'REST Request Timeout';
+  });
 }
 
 // ── WebSocket stream ──────────────────────────────────────────────────────────

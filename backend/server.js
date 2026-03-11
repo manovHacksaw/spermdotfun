@@ -283,7 +283,9 @@ async function main() {
         clients: state.clients.size,
         serverCurrentX: state.serverCurrentX,
         onchainReady: state.onchainReady,
-        version: '1.0.4-robust-feed'
+        lastFeedError: state.lastFeedError,
+        restAttempts: state.restAttempts,
+        version: '1.0.5-debug-feed'
       });
       return;
     }
