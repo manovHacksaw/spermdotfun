@@ -3,7 +3,7 @@ require('dotenv').config();
 const { createServer } = require('http');
 const { parse } = require('url');
 const { WebSocketServer } = require('ws');
-const { createProfileService } = require('../lib/server/profile-service');
+const { createProfileService } = require('./lib/server/profile-service');
 
 const { state, broadcast } = require('./state');
 const { initEvm } = require('./evm');
