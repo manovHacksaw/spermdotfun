@@ -67,7 +67,7 @@ export default function MultiplierBar() {
   useEffect(() => {
     const getWsUrl = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.hostname === 'localhost' ? 'localhost:3000' : window.location.host;
+      const host = window.location.hostname === 'localhost' ? 'localhost:3000' : 'spermdotfun-socket.onrender.com';
       return `${protocol}//${host}`;
     };
     const ws = new WebSocket(getWsUrl());

@@ -6,19 +6,25 @@ const { PRICE_STALE_MS, GAME_ADDRESS } = require('./config');
 const { state, broadcast } = require('./state');
 
 function initBinance() {
-  const ws = new WebSocket('wss://stream.binance.com:9443/ws/avaxusdt@ticker');
-  ws.onopen = () => console.log('[BINANCE] Connected to AVAX/USDT stream');
+  const ws = new WebSocket('wss://stream.binance.com:9443/ws/avaxusdt@miniTicker');
+
+  ws.onopen = () => console.log('[BINANCE] Connected to AVAX/USDT miniTicker stream');
+
   ws.onmessage = (evt) => {
     try {
       const data = JSON.parse(evt.data);
+      // 'c' is the last price in miniTicker
       const price = parseFloat(data.c);
-      if (price) {
+      if (price > 0) {
         state.currentAvaxPrice = price;
         state.lastPriceTick = Date.now();
-        if (state.priceBaseline === 0) state.priceBaseline = price;
+        if (state.priceBaseline === 0) {
+          state.priceBaseline = price;
+          console.log(`[BINANCE] Initial price: $${price}`);
+        }
       }
     } catch (e) {
-      console.error('[BINANCE] Parse error', e);
+      console.error('[BINANCE] Message parse error', e);
     }
   };
   ws.onerror = (err) => console.error('[BINANCE] Error', err);

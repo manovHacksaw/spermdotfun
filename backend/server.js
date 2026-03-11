@@ -92,7 +92,7 @@ function lookupNickname(address, profileService) {
   state.nicknameCache.set(address, { nickname: null, cachedAt: Date.now() });
   profileService.getWalletNickname(address)
     .then(nickname => state.nicknameCache.set(address, { nickname: nickname || null, cachedAt: Date.now() }))
-    .catch(() => {});
+    .catch(() => { });
 }
 
 // ── Ghost cursors ─────────────────────────────────────────────────────────────
@@ -138,7 +138,7 @@ function registerBet(msg, profileService) {
   if (!betKey || state.pendingBets.has(betKey)) return;
 
   if (msg.user && profileService.isEnabled()) {
-    profileService.ensureReferralCode(msg.user).catch(() => {});
+    profileService.ensureReferralCode(msg.user).catch(() => { });
     if (msg.referralCode) {
       profileService.handleReferral({ userWallet: msg.user, referralCode: msg.referralCode })
         .catch(err => console.error('[REFERRAL]', err.message));
@@ -197,7 +197,7 @@ async function main() {
     console.error('[PROFILE] startup failure:', error?.message || error);
   }
 
-  const shutdownProfile = async () => { try { await profileService.close(); } catch {} };
+  const shutdownProfile = async () => { try { await profileService.close(); } catch { } };
   process.once('SIGINT', shutdownProfile);
   process.once('SIGTERM', shutdownProfile);
 
@@ -367,6 +367,7 @@ async function main() {
       type: 'init', columns: state.allColumns, history: state.historyBuffer.slice(),
       currentX: state.serverCurrentX, multHistory: state.multHistory.slice(),
       houseBank: state.houseBankBalance, marketPaused: state.bettingPaused,
+      price: state.currentAvaxPrice,
     }));
 
     if (state.vrfPath.size > 0) {

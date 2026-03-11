@@ -800,7 +800,7 @@ export default function StockGrid() {
         if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         // In production (Render/Vercel), we don't want to append :3000
-        const host = window.location.hostname === 'localhost' ? 'localhost:3000' : window.location.host;
+        const host = window.location.hostname === 'localhost' ? 'localhost:3000' : 'spermdotfun-socket.onrender.com';
         return `${protocol}//${host}`;
       };
       const ws = new WebSocket(getWsUrl())
@@ -831,6 +831,10 @@ export default function StockGrid() {
           s.pointerCount = 0
           s.lastPointerTime = 0
           s.visitedCols.clear()
+          if (typeof data.price === 'number' && data.price > 0) {
+            s.currentPrice = data.price
+            window.dispatchEvent(new CustomEvent('sprmfun:price', { detail: { price: s.currentPrice } }))
+          }
 
           s.columns = (data.columns as any[]).map((col: any) => ({
             id: col.id, x: col.x as number, boxes: col.boxes as Box[],
