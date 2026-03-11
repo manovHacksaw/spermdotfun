@@ -285,7 +285,7 @@ async function main() {
         onchainReady: state.onchainReady,
         lastFeedError: state.lastFeedError,
         restAttempts: state.restAttempts,
-        version: '1.0.5-debug-feed'
+        version: '1.0.6-chainlink-feed'
       });
       return;
     }
