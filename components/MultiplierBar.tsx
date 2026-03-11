@@ -65,8 +65,12 @@ export default function MultiplierBar() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${window.location.hostname}:3000`);
+    const getWsUrl = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.hostname === 'localhost' ? 'localhost:3000' : window.location.host;
+      return `${protocol}//${host}`;
+    };
+    const ws = new WebSocket(getWsUrl());
     wsRef.current = ws;
 
     ws.onmessage = (e) => {

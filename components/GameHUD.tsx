@@ -340,7 +340,7 @@ export default function GameHUD() {
         const refCode = typeof window !== 'undefined' ? localStorage.getItem('sprmfun_ref') : null
 
         // 4. Register the bet with the server for auto-resolution
-        fetch('/register-bet', {
+        fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ''}/register-bet`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

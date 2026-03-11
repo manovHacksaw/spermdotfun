@@ -37,6 +37,8 @@ const EMPTY_STATS: ProfileStats = {
   avgPayout: 0,
 }
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ''
+
 async function readJsonOrThrow<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -96,7 +98,7 @@ export function useProfileData(
 
     try {
       const response = await fetch(
-        `/api/profile/overview?wallet=${encodeURIComponent(walletAddress)}&range=${encodeURIComponent(range)}&txLimit=1`,
+        `${API_BASE}/api/profile/overview?wallet=${encodeURIComponent(walletAddress)}&range=${encodeURIComponent(range)}&txLimit=1`,
       )
       const payload = await readJsonOrThrow<ProfileOverviewResponse>(response)
       setSettings(payload.settings ?? EMPTY_SETTINGS)
@@ -135,7 +137,7 @@ export function useProfileData(
       params.set('limit', '25')
       if (cursor) params.set('cursor', cursor)
 
-      const response = await fetch(`/api/profile/transactions?${params.toString()}`)
+      const response = await fetch(`${API_BASE}/api/profile/transactions?${params.toString()}`)
       const payload = await readJsonOrThrow<ProfileTransactionsResponse>(response)
 
       const incoming = Array.isArray(payload.items) ? payload.items : []
@@ -212,7 +214,7 @@ export function useProfileData(
 
     try {
       const token = await ensureProfileAccessToken(walletAddress, signMessage)
-      const response = await fetch('/api/profile/settings', {
+      const response = await fetch(`${API_BASE}/api/profile/settings`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

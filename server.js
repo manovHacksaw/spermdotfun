@@ -1156,6 +1156,27 @@ app.prepare().then(async () => {
     const parsedUrl = parse(req.url, true);
     const pathname = parsedUrl.pathname || "";
 
+    // ── CORS Handling ──
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+      "https://spermdotfun.vercel.app",
+      "http://localhost:3000",
+      "http://localhost:3001"
+    ];
+
+    if (origin && (allowedOrigins.includes(origin) || origin.endsWith(".vercel.app"))) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     if (await handleProfileApiRequest(req, res, parsedUrl)) {
       return;
     }
@@ -1253,7 +1274,20 @@ app.prepare().then(async () => {
     console.log(`  ▶  Server running on http://${hostname}:${PORT} (Next.js + WebSockets)`),
   );
 
-  const wss = new WebSocketServer({ server: httpServer });
+  const wss = new WebSocketServer({ noServer: true });
+
+  httpServer.on("upgrade", (request, socket, head) => {
+    const { pathname } = parse(request.url);
+
+    // Let Next.js handle its own hot-module-replacement (HMR) during dev
+    if (pathname?.startsWith("/_next")) {
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  });
 
   // ── Pointer broadcast (~30 fps) ─────────────────────────────────────────
   let broadcastCount = 0;
