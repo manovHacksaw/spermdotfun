@@ -6,9 +6,9 @@ const { PRICE_STALE_MS, GAME_ADDRESS } = require('./config');
 const { state, broadcast } = require('./state');
 
 function initBinance() {
-  const ws = new WebSocket('wss://stream.binance.com:9443/ws/avaxusdt@miniTicker');
+  const ws = new WebSocket('wss://stream.binance.com:9443/ws/avaxusdt@ticker');
 
-  ws.onopen = () => console.log('[BINANCE] Connected to AVAX/USDT miniTicker stream');
+  ws.onopen = () => console.log('[BINANCE] Connected to AVAX/USDT ticker stream');
 
   ws.onmessage = (evt) => {
     try {
