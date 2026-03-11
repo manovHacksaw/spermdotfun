@@ -1,39 +1,116 @@
 // ── Binance price feed + market pause + house bank ───────────────────────────
 
 const { WebSocket } = require('ws');
+const https = require('https');
 const { ethers } = require('ethers');
 const { PRICE_STALE_MS, GAME_ADDRESS } = require('./config');
 const { state, broadcast } = require('./state');
 
-function initBinance() {
-  const ws = new WebSocket('wss://stream.binance.com:9443/ws/avaxusdt@ticker');
-
-  ws.onopen = () => console.log('[BINANCE] Connected to AVAX/USDT ticker stream');
-
-  ws.onmessage = (evt) => {
-    try {
-      const data = JSON.parse(evt.data);
-      // 'c' is the last price in miniTicker
-      const price = parseFloat(data.c);
-      if (price > 0) {
-        state.currentAvaxPrice = price;
-        state.lastPriceTick = Date.now();
-        if (state.priceBaseline === 0) {
-          state.priceBaseline = price;
-          console.log(`[BINANCE] Initial price: $${price}`);
+// ── REST fallback — poll Binance HTTP API ─────────────────────────────────────
+function fetchPriceRest() {
+  const url = 'https://api.binance.com/api/v3/ticker/price?symbol=AVAXUSDT';
+  https.get(url, (res) => {
+    let body = '';
+    res.on('data', chunk => { body += chunk; });
+    res.on('end', () => {
+      try {
+        const price = parseFloat(JSON.parse(body).price);
+        if (price > 0) {
+          state.currentAvaxPrice = price;
+          state.lastPriceTick = Date.now();
+          if (state.priceBaseline === 0) {
+            state.priceBaseline = price;
+            console.log(`[BINANCE] REST initial price: $${price}`);
+          }
         }
+      } catch (e) {
+        console.error('[BINANCE] REST parse error', e.message);
       }
-    } catch (e) {
-      console.error('[BINANCE] Message parse error', e);
-    }
-  };
-  ws.onerror = (err) => console.error('[BINANCE] Error', err);
-  ws.onclose = () => {
-    console.log('[BINANCE] Connection closed, retrying in 5s...');
-    setTimeout(initBinance, 5000);
-  };
+    });
+  }).on('error', (e) => console.error('[BINANCE] REST fetch error', e.message));
 }
 
+// ── WebSocket stream ──────────────────────────────────────────────────────────
+function initBinance() {
+  // Try port 443 first (always open on hosting providers), fall back to 9443
+  const WS_URLS = [
+    'wss://stream.binance.com/ws/avaxusdt@ticker',
+    'wss://stream.binance.com:9443/ws/avaxusdt@ticker',
+  ];
+  let urlIndex = 0;
+
+  function connect() {
+    const url = WS_URLS[urlIndex % WS_URLS.length];
+    console.log(`[BINANCE] Connecting to ${url}`);
+    const ws = new WebSocket(url);
+
+    // If no message within 10s of open, assume port is blocked → try REST fallback
+    let openTimer = null;
+
+    ws.onopen = () => {
+      console.log(`[BINANCE] Connected (${url})`);
+      openTimer = setTimeout(() => {
+        if (state.currentAvaxPrice === 0) {
+          console.warn('[BINANCE] No data after 10s — starting REST fallback poll');
+          startRestFallback();
+        }
+      }, 10_000);
+    };
+
+    ws.onmessage = (evt) => {
+      if (openTimer) { clearTimeout(openTimer); openTimer = null; }
+      try {
+        const data = JSON.parse(evt.data);
+        const price = parseFloat(data.c);
+        console.log(`[BINANCE] Received tick for ${data.s}: ${data.c}`);
+        if (price > 0) {
+          state.currentAvaxPrice = price;
+          state.lastPriceTick = Date.now();
+          if (state.priceBaseline === 0) {
+            state.priceBaseline = price;
+            console.log(`[BINANCE] Initial price baseline set: $${price}`);
+          }
+        } else {
+          console.warn('[BINANCE] Price parsed as 0 or empty:', data.c);
+        }
+      } catch (e) {
+        console.error('[BINANCE] Message parse error', e, 'Data:', evt.data);
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error(`[BINANCE] Error on ${url}:`, err.message ?? err);
+      if (openTimer) { clearTimeout(openTimer); openTimer = null; }
+    };
+
+    ws.onclose = () => {
+      if (openTimer) { clearTimeout(openTimer); openTimer = null; }
+      urlIndex++;
+      const delay = urlIndex <= WS_URLS.length ? 2000 : 10_000;
+      console.log(`[BINANCE] Closed — retrying in ${delay / 1000}s`);
+      setTimeout(connect, delay);
+    };
+  }
+
+  connect();
+
+  // Fetch immediately via REST so price is nonzero from the first tick
+  fetchPriceRest();
+  // Also keep REST polling every 3s as a permanent safety net
+  startRestFallback();
+}
+
+// ── REST fallback poll (every 3s) ─────────────────────────────────────────────
+let restFallbackRunning = false;
+
+function startRestFallback() {
+  if (restFallbackRunning) return;
+  restFallbackRunning = true;
+  console.log('[BINANCE] REST fallback active (polling every 3s)');
+  setInterval(fetchPriceRest, 3000);
+}
+
+// ── Market pause ──────────────────────────────────────────────────────────────
 function checkAndUpdateMarketPause() {
   if (state.lastPriceTick === 0) return;
   const stale = Date.now() - state.lastPriceTick > PRICE_STALE_MS;
@@ -44,6 +121,7 @@ function checkAndUpdateMarketPause() {
   }
 }
 
+// ── House bank ────────────────────────────────────────────────────────────────
 async function updateHouseBank() {
   if (!state.onchainReady || !state.tokenContract || !GAME_ADDRESS) return;
   try {
