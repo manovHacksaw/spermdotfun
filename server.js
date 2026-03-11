@@ -11,11 +11,10 @@ const path = require("path");
 const { createProfileService } = require("./lib/server/profile-service");
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = "localhost";
-const NEXT_PORT = 3000;
-const WS_PORT = 3001;
+const hostname = "0.0.0.0"; // Listen on all interfaces
+const PORT = process.env.PORT || 3000;
 
-const app = next({ dev, hostname, port: NEXT_PORT });
+const app = next({ dev, hostname, port: PORT });
 const handle = app.getRequestHandler();
 
 // ── Layout constants ────────────────────────────────────────────────────────────
@@ -1250,12 +1249,11 @@ app.prepare().then(async () => {
       res.end("error");
     }
   });
-  httpServer.listen(NEXT_PORT, () =>
-    console.log(`  ▶  Next.js  http://${hostname}:${NEXT_PORT}`),
+  httpServer.listen(PORT, () =>
+    console.log(`  ▶  Server running on http://${hostname}:${PORT} (Next.js + WebSockets)`),
   );
 
-  const wsHttpServer = createServer();
-  const wss = new WebSocketServer({ server: wsHttpServer });
+  const wss = new WebSocketServer({ server: httpServer });
 
   // ── Pointer broadcast (~30 fps) ─────────────────────────────────────────
   let broadcastCount = 0;
@@ -1533,7 +1531,4 @@ app.prepare().then(async () => {
     ws.on("error", (err) => console.error("[WS] error", err));
   });
 
-  wsHttpServer.listen(WS_PORT, () =>
-    console.log(`  ▶  WebSocket  ws://${hostname}:${WS_PORT}\n`),
-  );
 });

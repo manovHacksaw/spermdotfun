@@ -66,7 +66,7 @@ export default function MultiplierBar() {
 
   useEffect(() => {
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${window.location.hostname}:3001`);
+    const ws = new WebSocket(`${proto}://${window.location.hostname}:3000`);
     wsRef.current = ws;
 
     ws.onmessage = (e) => {
@@ -77,7 +77,7 @@ export default function MultiplierBar() {
         } else if (msg.type === "mult_history") {
           setHistory(msg.history);
         }
-      } catch {}
+      } catch { }
     };
 
     return () => {

@@ -796,7 +796,7 @@ export default function StockGrid() {
 
     function connect() {
       if (unmounted) return
-      const ws = new WebSocket(process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001')
+      const ws = new WebSocket(process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3000')
       activeWs = ws
 
       ws.onopen = () => { s.connected = true; wsRef.current = ws; console.log('[WS] connected') }
