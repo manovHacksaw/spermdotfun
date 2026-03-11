@@ -6,416 +6,382 @@ This document catalogues every major function in SPRMFUN with its inputs, output
 
 ## server.js
 
-### `deriveWinningRow(vrfResult, serverSalt, boxX)`
+### `initEvm()`
+**Purpose:** Connect to Avalanche Fuji and initialise on-chain interfaces.
 
-| | |
-|---|---|
-| **Location** | `server.js` |
-| **Inputs** | `vrfResult: Buffer(32)`, `serverSalt: Buffer(32)`, `boxX: number` |
-| **Returns** | `number` — winning row index (0–9) |
-| **Side effects** | None |
-| **Description** | Computes `sha256(vrfResult ‖ serverSalt ‖ boxX_as_LE_int64)[0] % 10`. Mirrors the deterministic formula that the on-chain `consume_vrf` path would use. |
+**Side effects:**
+- Creates `ethers.JsonRpcProvider` from `AVALANCHE_RPC_URL`
+- Creates `ethers.Wallet` from `SERVER_PRIVATE_KEY` (the resolver signer)
+- Initialises `gameContract` (SprmGame ABI) and `tokenContract` (ERC-20 ABI)
+- Calls `subscribeVrfEvents()` to listen for Chainlink fulfillments
+- Calls `refreshVrfLocally(startColX)` to seed the first VRF epoch
+
+---
+
+### `initBinance()`
+**Purpose:** Open a persistent WebSocket to the Binance AVAX/USDT ticker.
+
+**Side effects:**
+- Connects to `wss://stream.binance.com:9443/ws/avaxusdt@trade`
+- Updates `currentAvaxPrice` and `lastPriceTick` on every message
+- Reconnects automatically on close/error
 
 ---
 
 ### `stepSim()`
+**Purpose:** Advance the game simulation by one tick (called at 30 Hz).
 
-| | |
-|---|---|
-| **Location** | `server.js` |
-| **Inputs** | None (reads/writes module-level `simY`, `simVelocity`, `simTime`) |
-| **Returns** | `{ y: number, multiplier: number }` — current pointer position (0–1) and display multiplier |
-| **Side effects** | Mutates `simY`, `simVelocity`, `simTime` |
-| **Description** | Advances the bounded random-walk price simulator by one tick. Applies damping (×0.95), Gaussian noise, a sinusoidal trend, occasional shocks, and mean-reversion toward 0.5. |
+**Inputs:** Global state — `currentAvaxPrice`, `simY`, `simVelocity`, `serverCurrentX`, `lastWinRow`
 
----
-
-### `steerTowardRow(targetRow, curColX, currentX)`
-
-| | |
-|---|---|
-| **Location** | `server.js` |
-| **Inputs** | `targetRow: number` (0–9), `curColX: number` (column start px), `currentX: number` (pointer px) |
-| **Returns** | `void` |
-| **Side effects** | Nudges `simVelocity` toward `targetRow`'s Y centre |
-| **Description** | Computes pixels remaining in the current column and adds a proportional velocity push so the pointer naturally reaches the VRF winning row. Urgency is clamped to [0.01, 0.15]. |
+**Side effects:**
+- Updates `simVelocity` using price delta + friction + inertia
+- Injects chaos impulses when price is flat for >1500 ms
+- Applies VRF steering bias toward current column's winning row
+- Updates `simY` (clamped to −50 … +50)
+- Advances `serverCurrentX` by `PX_PER_EVENT`
+- When pointer enters a new column: tracks `columnRowRange`, triggers `resolveBetsForColumn()`
+- Calls `broadcast({ type: "pointer", y, currentX, price, microVelocity })`
 
 ---
 
-### `refreshVrf(startColX)`
+### `resolveBet(betInfo)`
+**Purpose:** Settle one pending bet on-chain.
 
-| | |
-|---|---|
-| **Location** | `server.js` |
-| **Inputs** | `startColX: number` — first column X to pre-compute |
-| **Returns** | `Promise<void>` |
-| **Side effects** | Generates new `currentVrfResult` and `currentServerSalt`; calls `consume_vrf` on-chain; populates `vrfPath` for `VRF_REFRESH_COLS` columns; broadcasts `path_revealed` and `vrf_state` WS messages; increments `currentSeedIndex` |
-| **Description** | Refreshes the server-side VRF every `VRF_REFRESH_COLS` (8) columns. Uses `vrfRefreshing` flag to prevent concurrent calls. Falls through gracefully if `program` is not initialised (offline mode). |
+**Input:** `{ betId, user, box_x, box_row, mult_num, bet_amount }`
 
----
+**Algorithm:**
+1. Retrieve `columnRowRange[box_x]` — `{minRow, maxRow}`
+2. Win condition: `box_row >= minRow - 2 && box_row <= maxRow + 2`
+3. Compute `won` (boolean)
+4. Sign: `wallet.signMessage(ethers.getBytes(keccak256(abiEncode(betId, won, CONTRACT_ADDRESS))))`
+5. Call `gameContract.resolveBet(betId, won, serverSig)`
+6. Broadcast `{ type: "bet_resolved", betId, user, won, payout, colX, row }`
+7. Broadcast `{ type: "bet_receipt", betId, txHash, won }` after on-chain confirmation
+8. Update in-memory leaderboard
+9. Call `profileService.enqueueResolvedBet(...)` if DB is active
+10. Trigger referral reward if applicable
 
-### `resolveBet(betKey)`
-
-| | |
-|---|---|
-| **Location** | `server.js` |
-| **Inputs** | `betKey: string` — `betPda.toBase58()` used as Map key |
-| **Returns** | `Promise<void>` |
-| **Side effects** | Removes `betKey` from `pendingBets`; calls `resolve_bet` on-chain; broadcasts `bet_resolved` WS message to all clients |
-| **Description** | Determines win/lose by checking whether `bet.box_row` falls within `columnRowRange[colX]`. Passes `winRow = box_row` if win, any other row otherwise. Logs the outcome. Silently skips if no row range has been recorded yet. |
+**Side effects:** On-chain SPRM transfer, leaderboard mutation, WebSocket broadcast
 
 ---
 
-### `makeColumns(count)`
+### `resolveBetsForColumn(colX)`
+**Purpose:** Resolve all pending bets registered against a column when the pointer exits it.
 
-| | |
-|---|---|
-| **Location** | `server.js` |
-| **Inputs** | `count: number` — number of columns to generate |
-| **Returns** | `GridColumn[]` — array of column objects `{id, x, boxes[]}` |
-| **Side effects** | Increments `gridIdCounter`; advances `nextColX` by `count × COLUMN_WIDTH` |
-| **Description** | Factory that creates grid columns starting at `nextColX`. Each column has 10 boxes, one per multiplier row. |
+**Input:** `colX` (number) — the column X coordinate
+
+**Side effects:** Calls `resolveBet(betInfo)` for every pending bet with `box_x === colX`
 
 ---
 
-### `broadcast(msg)`
+### `deriveWinningRow(vrfResult, colX)`
+**Purpose:** Deterministically derive a winning row from VRF entropy and column ID.
 
-| | |
-|---|---|
-| **Location** | `server.js` |
-| **Inputs** | `msg: string` — serialised JSON message |
-| **Returns** | `void` |
-| **Side effects** | Calls `ws.send(msg)` on every open client in `clients` set |
-| **Description** | Fan-out broadcast helper. Skips clients whose `readyState` is not `OPEN`. |
+**Inputs:**
+- `vrfResult` (Buffer | hex string) — 32-byte entropy from Chainlink VRF
+- `colX` (number) — Column X coordinate
 
----
+**Returns:** `winRow` (number, 0–499)
 
-### Pointer loop (anonymous `setInterval`, 33 ms)
-
-| | |
-|---|---|
-| **Location** | `server.js` |
-| **Trigger** | Every 33 ms |
-| **Side effects** | Advances `serverCurrentX`; calls `stepSim`; updates `historyBuffer` and `columnRowRange`; broadcasts `pointer` message; triggers `resolveBet` for eligible pending bets; triggers `refreshVrf` when due; logs every 30 ticks and column transitions |
+**Algorithm:**
+1. `hash = SHA256(vrfResult || colX)`
+2. `delta = weightedRowDelta(hash[0])` — weighted from `[2,4,10,20,0,20,10,4,2]`
+3. Apply boundary repulsion (push away from row 0 and row 499)
+4. `winRow = clamp(lastWinRow + delta, 0, 499)`
 
 ---
 
-### Grid loop (anonymous `setInterval`, 3 000 ms)
+### `refreshVrfLocally(startColX)`
+**Purpose:** Populate the `vrfPath` map for the next VRF epoch (15 columns).
 
-| | |
-|---|---|
-| **Location** | `server.js` |
-| **Trigger** | Every 3 000 ms |
-| **Side effects** | Calls `makeColumns(5)` if look-ahead < 25 columns; appends to `allColumns`; prunes `allColumns` to 300 entries; broadcasts `grid` message |
+**Inputs:** `startColX` — starting column X
+
+**Side effects:**
+- If `VRF_ENABLED=true`: calls `gameContract.requestVrf()` and waits for `VrfFulfilled` event
+- If disabled/unavailable: generates `crypto.randomBytes(32)` as fallback entropy
+- For each column in the epoch: calls `deriveWinningRow()` and stores in `vrfPath`
+- Broadcasts `{ type: "vrf_state", paths: [...] }`
+
+---
+
+### `subscribeVrfEvents()`
+**Purpose:** Listen for on-chain `VrfFulfilled` events and update `currentVrfResult`.
+
+**Side effects:**
+- Attaches event listener on `gameContract` for `VrfFulfilled(epochId, requestId, vrfResult)`
+- On each event: updates `currentVrfResult`, calls `refreshVrfLocally()` to repopulate `vrfPath`
+
+---
+
+### `checkFeedStaleness()`
+**Purpose:** Detect if the Binance price feed has gone silent.
+
+**Side effects:**
+- If `Date.now() - lastPriceTick > PRICE_STALE_MS (5000)`:
+  - Sets `bettingPaused = true`
+  - Broadcasts `{ type: "market_paused", reason: "price_feed_stale" }`
+- If feed recovers:
+  - Sets `bettingPaused = false`
+  - Broadcasts `{ type: "market_resumed" }`
+
+---
+
+### `broadcast(message)`
+**Purpose:** Send a JSON message to all connected WebSocket clients.
+
+**Input:** `message` (object) — serialised to JSON
+
+**Side effects:** Sends to all entries in `clients` Set where `ws.readyState === OPEN`
+
+---
+
+### `POST /register-bet` handler
+**Purpose:** Register a bet that has already been placed on-chain.
+
+**Input body:**
+```json
+{
+  "betId": "42",
+  "user": "0xAbCd...1234",
+  "box_x": 12500,
+  "box_row": 247,
+  "mult_num": 350,
+  "bet_amount": 10.0
+}
+```
+
+**Validation:**
+- Rate limit: 60 req/min per IP
+- `bettingPaused` → returns 503 `{ ok: false, error: "market_paused" }`
+- EVM address format check
+- `box_row` in [0, 499]
+- `box_x` not more than 200 columns in the past
+- `mult_num` in [101, 2000]
+- `bet_amount` > 0
+
+**Side effects:**
+- Stores bet in `pendingBets` Map
+- Broadcasts updated `active_players` payload
 
 ---
 
 ## components/StockGrid.tsx
 
-### `resize()`
+### `connectWebSocket()`
+**Purpose:** Open WebSocket connection to the game server and register message handlers.
 
-| | |
-|---|---|
-| **Location** | `StockGrid.tsx` |
-| **Inputs** | None (reads `canvasRef`, `containerRef`) |
-| **Returns** | `void` |
-| **Side effects** | Sets `canvas.width`, `canvas.height`; updates `state.current.W` and `state.current.H` |
-| **Description** | Syncs canvas pixel dimensions to the container's bounding rect. Called on mount and on `window.resize`. |
+**Side effects:**
+- Sets up handlers for: `init`, `pointer`, `grid`, `vrf_state`, `bet_resolved`, `bet_receipt`, `leaderboard`, `active_players`, `house_bank`, `market_paused`, `market_resumed`, `mult_history`, `ghost_select`, `ghost_deselect`
+- Schedules reconnect on close/error
 
 ---
 
-### `yToRow(ny)`
+### `animate(timestamp)`
+**Purpose:** The 60 FPS requestAnimationFrame loop that renders the canvas.
 
-| | |
-|---|---|
-| **Location** | `StockGrid.tsx` |
-| **Inputs** | `ny: number` — normalised Y (0 = top, 1 = bottom) |
-| **Returns** | `number` — row index 0–9 (0 = bottom row) |
-| **Side effects** | None |
-| **Description** | Converts a normalised Y coordinate to a row index. `row = ROW_COUNT - 1 - floor(ny × ROW_COUNT)`. |
-
----
-
-### `draw()`
-
-| | |
-|---|---|
-| **Location** | `StockGrid.tsx` |
-| **Inputs** | None (reads `canvasRef`, `state.current`) |
-| **Returns** | `void` |
-| **Side effects** | Paints the entire canvas each frame |
-| **Description** | Full-frame canvas repaint. Renders in order: (1) background, (2) grid lines, (3) per-column box content (visited, pending, hover, resolved), (4) history polyline + glow, (5) pointer dot + crosshair + multiplier label, (6) WIN/LOSE toast, (7) header bar. |
+**Algorithm per frame:**
+1. Interpolate pointer Y: `alpha = elapsed / 100ms; drawY = lerp(prevY, currY, alpha)`
+2. Apply `microVelocity` offset to sperm head Y (sub-grid animation)
+3. Clear canvas
+4. Draw grid background + column dividers
+5. For each visible column: draw boxes with multiplier labels and bet highlights
+6. Draw pointer trail (opacity fades by age, blur/width scales with volatility)
+7. Draw sperm head with direction-aware aura glow (emerald up / orange-red down / magenta flat)
+8. If feed paused: draw grey overlay + "FEED PAUSED" text
+9. Draw ghost selections from other players
+10. Draw win/lose resolution overlays
 
 ---
 
-### `loop()`
+### `handleCellClick(colX, row)`
+**Purpose:** Dispatch a bet selection event when a user clicks a grid cell.
 
-| | |
-|---|---|
-| **Location** | `StockGrid.tsx` |
-| **Inputs** | None |
-| **Returns** | `void` |
-| **Side effects** | Calls `draw()`; logs a stall warning if no pointer event received in >5 s; schedules next frame via `requestAnimationFrame` |
-| **Description** | `rAF`-driven render loop. Stores the frame ID in `rafRef.current` for cleanup. |
-
----
-
-### `connect()` (inner function in mount `useEffect`)
-
-| | |
-|---|---|
-| **Location** | `StockGrid.tsx` (mount `useEffect`) |
-| **Inputs** | None (closes over `state`, `unmounted`, `retryTimer`, `activeWs`) |
-| **Returns** | `void` |
-| **Side effects** | Opens a `WebSocket` to `NEXT_PUBLIC_WS_URL`; sets `state.current.connected`; handles `init`, `pointer`, `grid`, `vrf_state`, `path_revealed`, `bet_resolved` messages; schedules reconnect on close |
-| **Description** | Establishes the WebSocket connection. On `init`, replaces columns/history and rebuilds `visitedCols`. On `pointer`, pushes to `historyBuffer`, updates `visitedCols` and `columnRowRange`. On `path_revealed`, resolves any pending selections whose column is now revealed. |
-
----
-
-### `getBoxAt(mouseX, mouseY)`
-
-| | |
-|---|---|
-| **Location** | `StockGrid.tsx` (mouse `useEffect`) |
-| **Inputs** | `mouseX: number`, `mouseY: number` — canvas-relative coordinates |
-| **Returns** | `{ colX: number; row: number } \| null` |
-| **Side effects** | None |
-| **Description** | Maps mouse coordinates to a grid cell. Returns `null` if the column is the current or past column (only future columns are selectable). |
-
----
-
-### `onMouseMove(e)` / `onClick(e)` / `onMouseLeave()`
-
-| | |
-|---|---|
-| **Location** | `StockGrid.tsx` (mouse `useEffect`) |
-| **Side effects** | `onMouseMove`: updates `state.current.hoverBox` and canvas cursor. `onClick`: toggles selection in `state.current.selections`; dispatches `sprmfun:select` CustomEvent. `onMouseLeave`: clears hover state. |
-
----
-
-### `onDeselect(e)`
-
-| | |
-|---|---|
-| **Location** | `StockGrid.tsx` |
-| **Inputs** | `CustomEvent` with `detail: { colX, row }` |
-| **Returns** | `void` |
-| **Side effects** | Removes the cell from `state.current.selections` |
-| **Description** | Handles the `sprmfun:deselect` event dispatched by `GameHUD` when the user cancels the bet modal. |
+**Side effects:**
+- `window.dispatchEvent(new CustomEvent('sprmfun:select', { detail: { colX, row, multiplier, multNum } }))`
+- Sends `ghost_select` to server via WebSocket
 
 ---
 
 ## components/GameHUD.tsx
 
-### `fetchBalance()`
+### `handleBetConfirm()`
+**Purpose:** Execute a bet placement on-chain and register it with the server.
 
-| | |
-|---|---|
-| **Location** | `GameHUD.tsx` |
-| **Inputs** | None (closes over `publicKey`, `connection`) |
-| **Returns** | `Promise<void>` |
-| **Side effects** | Updates React state `balance`; calls `getAccount` on the user's SPRM ATA |
-| **Description** | Fetches the user's SPRM token balance. Sets `balance = 0` if the ATA does not exist. Called on wallet connection and every 5 s. |
-
----
-
-### `cancelBet(colX, row)`
-
-| | |
-|---|---|
-| **Location** | `GameHUD.tsx` |
-| **Inputs** | `colX: number`, `row: number` |
-| **Returns** | `void` |
-| **Side effects** | Dispatches `sprmfun:deselect` CustomEvent; sets `pendingBet = null` |
-| **Description** | Cancels the active bet modal and removes the cell's green highlight from the grid. |
+**Algorithm:**
+1. Get `betAmount` from input
+2. If `activeWallet === 'instant'`: use session wallet signer; else use wagmi wallet client
+3. Check SPRM allowance; if insufficient, call `token.approve(CONTRACT_ADDRESS, MAX_UINT256)`
+4. Call `contract.placeBet(box_x, box_row, mult_num, amountWei)`
+5. Wait for tx confirmation, extract `betId` from `BetPlaced` event log
+6. `POST /register-bet` with betId
+7. `optimisticDeduct(betAmount)` if using session wallet
+8. Set cell state to "pending" (green highlight)
 
 ---
 
-### `handleFaucet()`
+### `handleBetResolution(event)`
+**Purpose:** Handle `bet_resolved` WebSocket message — show win/lose popup.
 
-| | |
-|---|---|
-| **Location** | `GameHUD.tsx` |
-| **Inputs** | None (closes over `program`, `publicKey`, `connection`, `signTransaction`, `fetchBalance`) |
-| **Returns** | `Promise<void>` |
-| **Side effects** | May call `POST /api/airdrop`; builds and submits a `faucet(5 × ONE_TOKEN)` transaction; polls for confirmation (max 40 × 1 s); calls `fetchBalance` on success; shows `alert` on error |
-| **Description** | Checks SOL balance; requests an airdrop if below 0.05 SOL; then submits the faucet instruction. Uses resend-every-2-s + polling strategy to handle localnet latency. |
+**Side effects:**
+- Triggers win (green) or lose (red) popup with payout amount
+- Spawns floating P/L text animation
+- Calls `refreshBalances()` after 800 ms
 
 ---
 
-### `handlePlaceBet()`
+## hooks/useSessionWallet.ts
 
-| | |
-|---|---|
-| **Location** | `GameHUD.tsx` |
-| **Inputs** | None (closes over `program`, `publicKey`, `pendingBet`, `betAmount`, `connection`, `signTransaction`, `fetchBalance`) |
-| **Returns** | `Promise<void>` |
-| **Side effects** | Validates amount; derives `betPda`; builds and submits `place_bet` tx; polls for confirmation; calls `POST /register-bet`; updates `betStatus`; calls `fetchBalance`; closes modal after 1.5 s on success |
-| **Description** | Core bet placement flow. Amount is parsed, converted to `BN` raw units. The bet PDA seed is `[b"bet", user, boxXBytes(box_x), [box_row]]`. Uses same resend-and-poll pattern as the faucet. |
+### `createSession()`
+**Purpose:** Create a new ephemeral session wallet and fund it.
 
----
+**Algorithm:**
+1. `ethers.Wallet.createRandom()` → save private key to localStorage
+2. Request MetaMask to send 0.05 AVAX to session address (via wagmi `sendTransaction`)
+3. Set `isActive = true`, update `sessionAddress`
 
-### `boxXBytes(boxX)`
-
-| | |
-|---|---|
-| **Location** | `GameHUD.tsx` |
-| **Inputs** | `boxX: number` |
-| **Returns** | `Buffer` — 8-byte little-endian representation of `boxX` |
-| **Side effects** | None |
-| **Description** | Encodes the column X pixel value as a signed 64-bit little-endian integer. Must match the on-chain PDA seed encoding (`box_x.to_le_bytes()`). |
+**Side effects:** localStorage write, MetaMask AVAX transfer
 
 ---
 
-## components/GlobalChat.tsx
+### `deposit(sprmAmt)`
+**Purpose:** Transfer SPRM from main wallet to session wallet.
 
-### `fetchSprmBalance(address)`
+**Algorithm:**
+1. Call `token.transfer(sessionAddress, amountWei)` from main wallet (wagmi)
+2. Wait for confirmation
+3. On first deposit: session wallet calls `token.approve(CONTRACT_ADDRESS, MAX_UINT256)`
+4. `refreshBalances()`
 
-| | |
-|---|---|
-| **Location** | `GlobalChat.tsx` |
-| **Inputs** | `address: string` — Solana public key (base58) |
-| **Returns** | `Promise<number \| null>` |
-| **Side effects** | Calls `connection.getTokenAccountBalance` |
-| **Description** | Derives the SPRM ATA for the address and fetches its balance. Returns `null` on any error (account not found, invalid address, etc.). |
-
----
-
-### `handleSenderMouseEnter(fullSender)`
-
-| | |
-|---|---|
-| **Location** | `GlobalChat.tsx` |
-| **Inputs** | `fullSender: string` — full 44-char base58 public key, or short display string |
-| **Returns** | `void` |
-| **Side effects** | Sets `tooltip` state; calls `fetchSprmBalance` if a full address is available |
-| **Description** | Shows a tooltip with the sender's SPRM balance on hover. Uses address length/format to detect whether a full lookup is possible. |
+**Side effects:** MetaMask SPRM transfer, on-chain allowance approval
 
 ---
 
-### `handleSubmit(e)`
+### `withdrawAll()`
+**Purpose:** Transfer all SPRM from session wallet back to main wallet.
 
-| | |
-|---|---|
-| **Location** | `GlobalChat.tsx` |
-| **Inputs** | `React.FormEvent` |
-| **Returns** | `void` |
-| **Side effects** | Calls `pubnub.publish`; clears `input` state |
-| **Description** | Publishes the chat message with the wallet's short address as sender. Anonymous users send as `'Anon'`. Message is trimmed and truncated to 200 characters via the `<input maxLength>` attribute. |
+**Algorithm:**
+1. Session wallet reads its SPRM balance
+2. Calls `token.transfer(mainAddress, fullBalance)` (signed by session key, no MetaMask)
+3. `refreshBalances()`
 
 ---
 
-## app/api/airdrop/route.ts
+### `optimisticDeduct(amount)`
+**Purpose:** Immediately reduce the displayed session SPRM balance before on-chain confirmation.
 
-### `POST(req)`
+**Input:** `amount` (number) — SPRM to deduct
 
-| | |
-|---|---|
-| **Location** | `app/api/airdrop/route.ts` |
-| **Inputs** | JSON body: `{ wallet: string }` |
-| **Returns** | `NextResponse` — `{ok, airdropped, sig?, balance}` or `{error}` |
-| **Side effects** | May call `connection.requestAirdrop` and `confirmTransaction` |
-| **Description** | Airdrops 1 SOL to the given wallet if its current balance is below 0.1 SOL. Returns `airdropped: false` if the threshold is already met. |
+**Side effects:** Updates `sessionSprmBalance` in React state
 
 ---
 
-## app/api/idl/route.ts
+### `refreshBalances()`
+**Purpose:** Re-read SPRM and AVAX balances from chain for both wallets.
 
-### `GET()`
-
-| | |
-|---|---|
-| **Location** | `app/api/idl/route.ts` |
-| **Inputs** | None |
-| **Returns** | `NextResponse` — parsed IDL JSON |
-| **Side effects** | Reads `sprmfun-anchor/target/idl/sprmfun_anchor.json` from disk |
-| **Description** | Serves the compiled Anchor IDL to the browser so `GameHUD` can construct a typed `anchor.Program` instance. |
+**Side effects:** Updates `sessionSprmBalance`, `sessionAvaxBalance`, and main wallet balances
 
 ---
 
-## sprmfun-anchor/programs/sprmfun-anchor/src/lib.rs
+## lib/sessionWallet.ts
 
-### `initialize(ctx, house_edge_bps)`
+### `saveSessionWallet(privateKey)`
+Writes `privateKey` to `localStorage['sprmfun:session_evm_key']`.
 
-| | |
-|---|---|
-| **Inputs** | `house_edge_bps: u16` (must be ≤ 5 000) |
-| **Side effects** | Creates `State` PDA and `Mint` PDA; sets authority, house edge, seed fields |
-| **Errors** | `HouseEdgeTooHigh` |
+### `loadSessionWallet()`
+Reads private key from localStorage and returns a reconstructed `ethers.Wallet`.
+Returns `null` if no key is stored.
 
----
-
-### `init_atas(ctx)`
-
-| | |
-|---|---|
-| **Side effects** | Creates escrow ATA (`associated_token(mint, state)`) and treasury ATA (`associated_token(mint, authority)`); stores escrow pubkey in `State` |
+### `destroySessionWallet()`
+Removes `sprmfun:session_evm_key` from localStorage.
 
 ---
 
-### `faucet(ctx, amount)`
+## lib/username.ts
 
-| | |
-|---|---|
-| **Inputs** | `amount: u64` — token amount in raw units (9 decimals) |
-| **Side effects** | Mints `amount` tokens to `user_ata` using `state` PDA as CPI signer; uses `init_if_needed` for the ATA |
-| **Errors** | `FaucetDisabled` |
+### `generateRandomName()`
+**Returns:** Random name string, e.g. `"NeonWolf4823"` — adjective + noun + 4-digit suffix.
+Pool: 60 adjectives × 65 nouns × 10,000 suffixes ≈ 39 million combinations.
 
----
+### `getOrCreateUsername(walletAddress)`
+**Returns:** Persisted username for the wallet, generating one if it doesn't exist yet.
+Reads/writes `localStorage['sprmfun:username:<address>']`.
 
-### `consume_vrf(ctx, randomness, server_salt)`
-
-| | |
-|---|---|
-| **Inputs** | `randomness: [u8; 32]`, `server_salt: [u8; 32]` |
-| **Side effects** | Updates `state.vrf_result`, `state.seed_salt`, `state.seed_index`, `state.seed_updated_at`; emits `VrfUpdated` event |
-| **Errors** | `Overflow` (seed_index overflow — extremely unlikely) |
-| **Access control** | Only the authority (state.authority) can sign |
+### `deriveUsername(walletAddress)`
+**Returns:** Deterministic username derived from the wallet address via djb2 hash.
+Used as a fallback for addresses seen in chat that aren't the current user.
 
 ---
 
-### `place_bet(ctx, box_x, box_row, amount)`
+## lib/profile/clientAuth.ts
 
-| | |
-|---|---|
-| **Inputs** | `box_x: i64` (column X in pixels), `box_row: u8` (0–9), `amount: u64` (> 0) |
-| **Side effects** | Transfers `amount` tokens from `user_ata` to escrow; initialises `Bet` PDA |
-| **Errors** | `InvalidRow`, `ZeroBet` |
+### `ensureProfileAccessToken(walletAddress, signMessage)`
+**Purpose:** Obtain a valid profile access token, using cache if available.
 
----
+**Algorithm:**
+1. Check `sessionStorage` for non-expired cached token
+2. If none: `POST /api/profile/auth/challenge` → get `{ nonce, message, expiresAt }`
+3. Call `signMessage(textEncode(message))` → returns EVM hex signature
+4. `POST /api/profile/auth/verify` with `{ wallet, nonce, signature }` → get `{ accessToken, expiresAt }`
+5. Cache in `sessionStorage`
+6. Return `accessToken`
 
-### `resolve_bet(ctx, winning_row)`
-
-| | |
-|---|---|
-| **Inputs** | `winning_row: u8` (0–9) |
-| **Side effects** | Marks bet as resolved; if `bet.box_row == winning_row`: transfers net payout from escrow to `user_ata` and fee to treasury; emits `BetResolved` event |
-| **Errors** | `AlreadyResolved`, `InvalidRow` |
-| **Access control** | Only the authority can sign |
+**Input:** `signMessage` — wagmi's `signMessage` function (returns hex sig string)
 
 ---
 
-### `sweep_escrow(ctx)`
+## lib/server/profile-service.js
 
-| | |
-|---|---|
-| **Side effects** | Transfers entire escrow balance to treasury; no-op if escrow is empty |
-| **Access control** | Only the authority can sign |
+### `init()`
+**Returns:** `boolean` — `true` if DB connected, `false` if disabled/unavailable.
+**Side effects:** Connects to Supabase, starts the 2.5 s flush timer for the bet write queue.
+
+### `enqueueResolvedBet(payload)`
+**Purpose:** Add a resolved bet to the write queue for async DB insertion.
+**Side effects:** Pushes to `writeQueue`, triggers `flushResolvedBetQueue()`.
+
+### `getOverview({ wallet, range, txLimit })`
+**Returns:** `{ wallet, stats, pnlSeries, transactions, settings, linkedSessionWallets }`
+**Notes:** Resolves the wallet scope (main + all linked session wallets) before querying.
+
+### `createAuthChallenge(wallet)`
+**Returns:** `{ nonce, message, expiresAt }`
+**Side effects:** Inserts nonce into `profile_auth_nonces` table (TTL: 5 min default).
+
+### `verifyAuthChallenge({ wallet, nonce, signature })`
+**Returns:** `{ wallet, accessToken, expiresAt }`
+**Algorithm:**
+1. Look up nonce in DB; check not expired, not used
+2. `ethers.verifyMessage(message, signature)` → recover signer address
+3. Compare recovered address to `wallet` (case-insensitive)
+4. Mark nonce used, create session in `profile_auth_sessions`
+
+### `linkSessionWallet({ mainWallet, sessionWallet })`
+**Purpose:** Associate a session wallet address with a main wallet for unified stats.
+**Side effects:** Updates `wallet_links` table.
+
+### `handleReferral(db, logger, { userWallet, referralCode })`
+**Purpose:** Record a referral relationship if not already set.
+**Side effects:** Writes `referred_by` to `profile_settings` for `userWallet`.
+
+### `normalizeWallet(input)`
+**Returns:** EVM checksummed address string, or `null` if invalid.
+**Uses:** `ethers.getAddress(input)`
 
 ---
 
-## scripts/init-devnet.js — `main()`
+## lib/friendlyError.ts
 
-| | |
-|---|---|
-| **Side effects** | Reads `ANCHOR_WALLET` keypair; calls `initialize(200)` if state PDA doesn't exist; calls `init_atas()` if escrow ATA doesn't exist; logs addresses to stdout |
-| **Idempotent** | Yes — skips already-created accounts |
+### `friendlyError(rawError)`
+**Input:** Raw error (Error object, string, or unknown)
 
----
+**Returns:** Player-readable error string
 
-## scripts/prefund-escrow.js — `main()`
-
-| | |
-|---|---|
-| **Side effects** | Mints 1 M SPRM to authority ATA via faucet; then transfers 1 M SPRM from authority ATA to escrow |
-| **Precondition** | `initialize` and `init_atas` must have been called first |
+**Mapped patterns include:**
+- `insufficient funds` → "Your wallet doesn't have enough AVAX for gas"
+- `user rejected` → "Transaction cancelled"
+- `market_paused` → "Betting is paused — price feed unavailable"
+- `allowance` → "Token approval failed — please try again"
+- `nonce` → "Transaction nonce issue — please refresh"
+- `timeout` → "Transaction timed out — check your wallet"
+- `SPRM balance` → "Not enough SPRM tokens"
+- `bet already resolved` → "This bet was already settled"

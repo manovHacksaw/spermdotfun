@@ -1,152 +1,213 @@
 # System Architecture
 
-This document describes the high-level system architecture of SPRMFUN — how the major runtime processes and external services relate to each other.
+This document describes the high-level architecture of SPRMFUN: the major subsystems, how they communicate, and where each responsibility lives.
 
 ---
 
-## Component Overview
+## Overview
 
-```mermaid
-graph TD
-    subgraph Browser["Browser (Player)"]
-        UI["Next.js UI\n(React 19)"]
-        WA["Wallet Adapter\n(Phantom)"]
-    end
+SPRMFUN has three runtime processes:
 
-    subgraph Server["Node.js Server (server.js)"]
-        NX["Next.js Handler\n:3000"]
-        WSS["WebSocket Server\n:3001"]
-        SIM["Price Simulator\n(30 fps loop)"]
-        VRF["VRF Engine\n(SHA-256)"]
-        BET["Bet Resolver"]
-    end
+| Process | Port | Technology | Responsibility |
+|---|---|---|---|
+| **Game server** | 3001 (WS) | Node.js `server.js` | Price feed, game loop, bet registration, on-chain resolution |
+| **Next.js server** | 3000 (HTTP) | Next.js 19 | Frontend, API routes (profile) |
+| **Avalanche node** | external | Fuji RPC | Smart contract state, token balances, VRF |
 
-    subgraph Solana["Solana Blockchain"]
-        PROG["sprmfun_anchor\nProgram"]
-        STATE["State PDA"]
-        MINT["SPRM Mint PDA"]
-        ESCROW["Escrow ATA"]
-        TREASURY["Treasury ATA"]
-        BETPDA["Bet PDA\n(per user × cell)"]
-    end
+In production, `server.js` starts the Next.js custom HTTP server on port 3000 and the WebSocket game server on port 3001. Both share the same Node.js process.
 
-    subgraph External["External Services"]
-        PUBNUB["PubNub\n(Global Chat)"]
-        RPC["Solana RPC Node"]
-    end
+---
 
-    UI -- "HTTP :3000" --> NX
-    UI -- "WS :3001" --> WSS
-    WA -- "signs txns" --> UI
-    UI -- "POST /register-bet" --> NX
+## High-Level Component Diagram
 
-    SIM -- "pointer ticks" --> WSS
-    VRF -- "path_revealed" --> WSS
-    BET -- "resolve_bet CPI" --> RPC
-
-    RPC --> PROG
-    PROG --> STATE
-    PROG --> MINT
-    PROG --> ESCROW
-    PROG --> TREASURY
-    PROG --> BETPDA
-
-    UI -- "publish/subscribe" --> PUBNUB
-    Server -- "RPC calls" --> RPC
-    WA -- "submit txns" --> RPC
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                          Browser                                 │
+│                                                                  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
+│  │  StockGrid   │  │   GameHUD    │  │  BetSidebar /        │  │
+│  │  (canvas)    │  │  (bet modal) │  │  TopHeader /         │  │
+│  └──────┬───────┘  └──────┬───────┘  │  ChatSidebar         │  │
+│         │                 │          └──────────────────────┘  │
+│         │  WebSocket      │  wagmi / ethers.js                  │
+└─────────┼─────────────────┼──────────────────────────────────────┘
+          │                 │
+          ▼                 ▼
+┌─────────────────┐   ┌─────────────────────────────────────────┐
+│  server.js      │   │         Avalanche Fuji (EVM)            │
+│                 │   │                                         │
+│  WebSocket      │   │  ┌──────────────┐  ┌────────────────┐  │
+│  game server    │──▶│  │  SprmGame    │  │  SprmToken     │  │
+│  :3001          │   │  │  (contract)  │  │  (ERC-20)      │  │
+│                 │   │  └──────────────┘  └────────────────┘  │
+│  ┌──────────┐   │   │                                         │
+│  │ Price    │   │   │  ┌──────────────────────────────────┐  │
+│  │ feed     │   │   │  │  Chainlink VRF v2.5              │  │
+│  │ (Binance │   │   │  │  (randomness oracle)             │  │
+│  │  WS)     │   │   │  └──────────────────────────────────┘  │
+│  └──────────┘   │   └─────────────────────────────────────────┘
+│                 │
+│  ┌──────────┐   │   ┌──────────────────┐
+│  │ Profile  │──▶│   │  Supabase        │
+│  │ service  │   │   │  (PostgreSQL)    │
+│  └──────────┘   │   │  optional        │
+└─────────────────┘   └──────────────────┘
 ```
 
 ---
 
-## Runtime Processes
+## Data Flow: Bet Lifecycle
 
-### Next.js HTTP Server (port 3000)
+```
+Player clicks cell
+        │
+        ▼
+  StockGrid fires
+  sprmfun:select event
+        │
+        ▼
+  GameHUD shows
+  confirmation modal
+        │
+        ▼
+  User confirms ──► wagmi: call contract.placeBet()
+                           (transfers SPRM to contract)
+        │
+        ▼
+  On tx confirmed:
+  POST /register-bet ──► server.js stores in pendingBets
+        │
+        ▼
+  Game pointer
+  crosses column
+        │
+        ▼
+  server.js resolveBet()
+    ├── Determine win/lose (pointer row vs bet row ±2 forgiveness)
+    ├── Sign payload: keccak256(betId, won, contractAddress)
+    ├── Call contract.resolveBet(betId, won, serverSig)
+    └── Broadcast bet_resolved via WebSocket
+        │
+        ▼
+  StockGrid / GameHUD
+  show win/lose popup
+```
 
-Serves the compiled Next.js application and exposes two API routes:
+---
 
-| Route | Method | Description |
+## Data Flow: Price → Pointer
+
+```
+Binance WS (AVAX/USDT ticker)
+        │
+        ▼
+  server.js: currentAvaxPrice updated
+        │
+        ▼
+  stepSim() at 30 Hz:
+    priceDelta = currentPrice - prevPrice
+    velocity += priceDelta × PRICE_CHAOS_FACTOR × INERTIA
+    velocity *= FRICTION
+    simY = clamp(simY + velocity, -50, +50)
+    ── VRF steering bias applied when column approaching exit
+        │
+        ▼
+  Broadcast {type:"pointer", y, currentX, price}
+        │
+        ▼
+  StockGrid: 60 Hz interpolation
+    alpha = elapsed / 100ms
+    drawY = lerp(prevY, currY, alpha)
+```
+
+---
+
+## Data Flow: VRF Randomness
+
+```
+server.js crosses VRF_REFRESH_COLS (15) columns
+        │
+        ▼
+  If VRF_ENABLED=true:
+    contract.requestVrf() ──► Chainlink VRF Coordinator
+                                      │
+                              (async, ~1–2 blocks)
+                                      ▼
+                       contract.fulfillRandomWords()
+                       emits VrfFulfilled(epochId, requestId, vrfResult)
+        │
+        ▼
+  server.js subscribeVrfEvents() receives vrfResult
+        │
+        ▼
+  For each column c in [startColX, startColX + 15 × 50px]:
+    winRow = deriveWinningRow(vrfResult, c)
+    vrfPath[c] = winRow
+        │
+        ▼
+  Broadcast {type:"vrf_state", paths: [...]}
+        │
+        ▼
+  Pointer steering: when pointer enters column c,
+    steerTarget = rowToY(winRow)
+    elastic pull applied over ~60% of column width
+```
+
+---
+
+## In-Memory State (server.js)
+
+All game state is held in memory and rebuilt from the live price feed on restart. There is no persistent game-state database — only the optional Supabase profile DB for player statistics.
+
+| Variable | Type | Contents |
 |---|---|---|
-| `/api/idl` | GET | Returns the compiled Anchor IDL as JSON |
-| `/api/airdrop` | POST | Requests a SOL airdrop on localnet for the given wallet |
-| `/register-bet` | POST | Registers a confirmed on-chain bet for server-side resolution |
-
-### WebSocket Game Server (port 3001)
-
-Maintains a live simulation loop that runs at ~30 fps (every 33 ms). On each tick it:
-
-1. Advances the simulated price (`stepSim`)
-2. Steers the pointer toward the VRF-determined winning row
-3. Broadcasts a `pointer` message to all connected clients
-4. Checks whether any pending bets can now be resolved (pointer has passed the bet's column)
-5. Triggers `refreshVrf` when due
-
-Every 3 seconds it broadcasts new `grid` columns to keep the look-ahead buffer full.
-
-### Solana Program (on-chain)
-
-A Rust/Anchor program deployed at `BN8y2gfrrVe1Nira9R9PtN6BzfuyKjQZ1LyoXUT3yJfw`. All token custody, bet lifecycle, and payout arithmetic happen on-chain. The server acts as the trusted **authority** that posts VRF results and resolves bets.
+| `currentAvaxPrice` | number | Latest AVAX/USDT price |
+| `simY` | number | Pointer Y position (−50 to +50) |
+| `simVelocity` | number | Current vertical velocity |
+| `serverCurrentX` | number | Pointer X pixel position |
+| `allColumns` | Column[] | All generated columns (max 400) |
+| `historyBuffer` | Point[] | Recent pointer trail (max 2800) |
+| `pendingBets` | Map | betId → bet details |
+| `vrfPath` | Map | colX → winning row |
+| `columnRowRange` | Map | colX → {minRow, maxRow} visited |
+| `leaderboard` | Map | address → player stats |
+| `bettingPaused` | boolean | True when price feed is stale >5 s |
 
 ---
 
-## Data Flow — Bet Lifecycle
+## Session Wallet Architecture
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Browser
-    participant Server
-    participant Solana
+The session wallet enables gasless instant bets without MetaMask prompts per bet.
 
-    User->>Browser: Click grid cell (future column)
-    Browser->>Browser: Show bet modal
-    User->>Browser: Enter amount → Confirm Bet
-    Browser->>Solana: place_bet tx (signed by Phantom)
-    Solana-->>Browser: tx confirmed
-    Browser->>Server: POST /register-bet {betPda, box_x, box_row, userAta}
-    Server->>Server: Store in pendingBets Map
-
-    loop Every 33ms
-        Server->>Server: stepSim() → advance pointer
-        Server->>Browser: WS pointer event
-        alt pointer has passed bet column
-            Server->>Solana: resolve_bet tx (signed by authority)
-            Solana-->>Server: tx confirmed
-            Server->>Browser: WS bet_resolved event
-            Browser->>User: WIN / LOSE toast
-        end
-    end
+```
+User's main wallet (MetaMask)
+        │
+        ├── Sends 0.05 AVAX ──► Session wallet (ephemeral keypair in localStorage)
+        │
+        └── Transfers SPRM ──► Session wallet SPRM balance
+                                        │
+                                        ▼
+                              Session wallet auto-approves
+                              MAX_UINT256 on game contract
+                                        │
+                                        ▼
+                              Per bet: session key signs tx locally
+                              (no MetaMask popup, instant UX)
+                                        │
+                                        ▼
+                              contract.placeBet() called from session wallet
 ```
 
----
-
-## Infrastructure Topology
-
-```mermaid
-graph LR
-    subgraph Host
-        D["Docker Container\n(node:24-slim)"]
-        D -- ":3000" --> LB["Reverse Proxy / Load Balancer"]
-        D -- ":3001 (WS)" --> LB
-    end
-    LB --> Internet
-    D -- "RPC" --> RPC["Solana RPC\n(devnet or localnet)"]
-    D -- "PubNub API" --> PN["PubNub Cloud"]
-```
-
-> **Assumption**: A reverse proxy (e.g. nginx or Caddy) fronts both ports in production. The Dockerfile exposes `3000` and `3001`. Actual proxy configuration is not present in this repository.
+The session private key is stored in `localStorage` under `sprmfun:session_evm_key`. It never leaves the browser.
 
 ---
 
-## Key Design Constraints
+## Profile System (Optional)
 
-| Constraint | Value |
-|---|---|
-| Grid column width | 140 px |
-| Rows per column | 10 |
-| Pointer broadcast rate | ~30 fps (33 ms interval) |
-| Grid look-ahead | 25 columns |
-| History buffer size | 4 000 points (client) / 2 800 points (server) |
-| VRF refresh period | Every 8 columns (~37 s at default speed) |
-| Max column memory (client) | 300 columns |
-| Token decimals | 9 |
-| House edge | 200 bps (2 %) — set at initialisation |
+If `SUPABASE_DB_URL` is not set, the server runs in-memory-only mode with no persistent stats.
+
+When enabled:
+- `lib/server/profile-service.js` connects to Supabase on startup
+- Resolved bets are enqueued and flushed to `profile_transactions` every 2.5 s
+- Profile API routes (`/api/profile/*`) serve auth, stats, settings, and leaderboard
+- Auth uses EVM personal_sign challenge: browser signs a nonce, server verifies with `ethers.verifyMessage()`

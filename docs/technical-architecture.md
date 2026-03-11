@@ -1,6 +1,6 @@
 # Technical Architecture
 
-This document describes the technical stack, inter-process communication, module boundaries, and key implementation choices in SPRMFUN.
+This document describes the technical stack, module boundaries, WebSocket protocol, and key implementation decisions in SPRMFUN.
 
 ---
 
@@ -9,221 +9,335 @@ This document describes the technical stack, inter-process communication, module
 | Concern | Technology | Version | Notes |
 |---|---|---|---|
 | Frontend framework | Next.js | ^16.1.6 | App Router; React 19 |
-| Language (frontend) | TypeScript | ^5 | Strict mode |
-| Rendering | HTML5 Canvas | — | No UI library; raw 2D context |
-| Blockchain SDK | `@coral-xyz/anchor` | ^0.32.1 | Provides `Program`, `AnchorProvider`, `BN` |
-| Solana web3 | `@solana/web3.js` | ^1.98.4 | `Connection`, `PublicKey`, `Keypair` |
-| SPL Token | `@solana/spl-token` | ^0.4.14 | ATA helpers, `getAccount` |
-| Wallet adapter | `@solana/wallet-adapter-*` | various | Phantom only (`PhantomWalletAdapter`) |
+| Language | TypeScript | ^5 | Strict mode on frontend |
+| Rendering | HTML5 Canvas | — | Raw 2D context; no UI library |
+| Blockchain SDK | wagmi | 2 | React hooks for EVM |
+| EVM library | ethers.js | ^6.13.0 | Provider, Wallet, Contract |
+| Wallet UI | RainbowKit | ^2.2.10 | MetaMask, WalletConnect, etc. |
+| Smart contract | Solidity | 0.8.24 | `evmVersion: cancun`, `viaIR: true` |
+| Randomness | Chainlink VRF | v2.5 | Fuji VRF Coordinator |
 | Real-time transport | `ws` | ^8.18.0 | Node.js WebSocket server |
 | Chat | PubNub | ^10.2.7 | Browser SDK |
-| Smart contract | Anchor / Rust | 0.32 | `anchor-lang`, `anchor-spl` |
-| Icons | `lucide-react` | ^0.575.0 | `Volume2`, `VolumeX`, `MessageSquare`, `Send`, `X` |
-| Config | `dotenv` | ^17.3.1 | Loaded in `server.js` |
-| Containerisation | Docker | — | Multi-stage (`deps` → `builder` → `runner`) |
+| HTTP queries | @tanstack/react-query | ^5.90.21 | Profile API data fetching |
+| Icons | lucide-react | ^0.575.0 | |
+| Profile DB | Supabase (PostgreSQL) | — | Optional; `pg` driver |
+| Containerisation | Docker | — | Multi-stage build |
+| Config | dotenv | ^17.3.1 | Loaded in `server.js` |
 
 ---
 
 ## Module Map
 
-```mermaid
-graph TD
-    subgraph Next["Next.js App (app/)"]
-        LAY["layout.tsx\n(root layout)"]
-        PAGE["page.tsx\n(home)"]
-        IDL_RT["api/idl/route.ts"]
-        AIR_RT["api/airdrop/route.ts"]
-    end
+```
+server.js (Node.js)
+├── initEvm()                  ethers.js provider + signer + contracts
+├── initBinance()              Binance WebSocket price feed
+├── stepSim()                  30Hz game loop
+├── resolveBet()               on-chain bet settlement
+├── refreshVrfLocally()        Chainlink VRF epoch management
+└── profileService             Supabase integration (optional)
 
-    subgraph Components["components/"]
-        SG["StockGrid.tsx\n(canvas + WS client)"]
-        GH["GameHUD.tsx\n(wallet, betting, faucet)"]
-        GC["GlobalChat.tsx\n(PubNub chat)"]
-        WP["WalletProvider.tsx\n(Solana context)"]
-    end
+app/ (Next.js)
+├── layout.tsx                 WalletProvider (wagmi + RainbowKit)
+├── page.tsx                   Main game page
+├── faucet/page.tsx            Token faucet
+├── profile/page.tsx           Profile stats page
+└── api/profile/               Profile REST API routes
 
-    subgraph Server["server.js"]
-        SRV_HTTP["HTTP handler\n(Next.js passthrough)"]
-        SRV_WS["WebSocket server"]
-        SRV_SIM["Simulator loop"]
-        SRV_VRF["VRF engine"]
-        SRV_BET["Bet resolver"]
-        SRV_CHAIN["Anchor program handle"]
-    end
+components/
+├── StockGrid.tsx              Game canvas + WebSocket client
+├── GameHUD.tsx                Bet modal + session wallet UI
+├── BetSidebar.tsx             Deposit/withdraw + live bet feed
+├── TopHeader.tsx              Wallet button + profile menu
+├── MultiplierBar.tsx          Scrolling multiplier history
+└── ChatSidebar.tsx / GlobalChat.tsx   PubNub chat
 
-    LAY --> WP
-    LAY --> PAGE
-    PAGE --> SG
-    PAGE --> GH
-    PAGE --> GC
+hooks/
+├── useSessionWallet.ts        Session wallet state + transactions
+├── useLiveGameStats.ts        WebSocket leaderboard/active players
+├── useSprmBalance.ts          On-chain ERC-20 balance polling
+├── useUsername.ts             Persistent random username
+└── useProfileData.ts          Profile API + auth challenge flow
 
-    SG -- "WS :3001" --> SRV_WS
-    GH -- "WS :3001" --> SRV_WS
-    GH -- "POST /register-bet" --> SRV_HTTP
-    GH -- "GET /api/idl" --> IDL_RT
-    GH -- "POST /api/airdrop" --> AIR_RT
-
-    SRV_SIM --> SRV_VRF
-    SRV_SIM --> SRV_BET
-    SRV_BET --> SRV_CHAIN
-    SRV_VRF --> SRV_CHAIN
+lib/
+├── sessionWallet.ts           localStorage keypair helpers
+├── username.ts                Username generation + storage
+├── friendlyError.ts           Error message mapping
+├── profile/clientAuth.ts      EVM challenge-signature auth flow
+└── server/profile-service.js  Supabase queries + bet recording
 ```
 
 ---
 
-## Server Architecture (`server.js`)
+## WebSocket Protocol
 
-`server.js` is a monolithic Node.js entry point that:
-
-1. Loads environment variables via `dotenv`
-2. Prepares the Next.js application (`app.prepare()`)
-3. Starts an HTTP server on **port 3000** that:
-   - Handles `POST /register-bet` directly (no Next.js routing)
-   - Passes all other requests to the Next.js request handler
-4. Starts a separate HTTP server on **port 3001** exclusively for the WebSocket upgrade
-
-### Timer Loops
-
-| Loop | Interval | Purpose |
-|---|---|---|
-| Pointer broadcast | 33 ms | Advance simulation, broadcast pointer, resolve bets, trigger VRF refresh |
-| Grid broadcast | 3 000 ms | Emit 5 new grid columns when look-ahead drops below 25 columns |
-
-### In-Memory State
-
-| Variable | Type | Description |
-|---|---|---|
-| `historyBuffer` | `Array` (max 2 800) | Recent pointer positions `{x, y, multiplier}` |
-| `allColumns` | `Array` (max 300) | All generated grid columns |
-| `clients` | `Set<WebSocket>` | Currently connected browser clients |
-| `pendingBets` | `Map<betPdaStr, BetInfo>` | Bets awaiting resolution |
-| `vrfPath` | `Map<colX, {row, vrfResult, serverSalt}>` | Pre-computed winning rows |
-| `columnRowRange` | `Map<colX, {minRow, maxRow}>` | Row range pointer traversed per column |
-| `serverCurrentX` | `number` | Current pointer X position in pixels |
-
----
-
-## WebSocket Message Protocol
-
-All messages are JSON strings.
+The game server broadcasts at ~30 FPS (every 33 ms). All messages are JSON.
 
 ### Server → Client
 
-| `type` | Fields | Description |
-|---|---|---|
-| `init` | `columns`, `history`, `currentX` | Full state snapshot sent on connect |
-| `pointer` | `y`, `multiplier`, `currentX`, `timestamp` | Per-tick pointer position |
-| `grid` | `columns` | Batch of new grid columns |
-| `vrf_state` | `paths[]` (`{colX, row}`), `seedIndex` | Known VRF paths for newly connected client |
-| `path_revealed` | `paths[]` (`{colX, row}`), `seedIndex` | New VRF paths after a refresh |
-| `bet_resolved` | `betPda`, `user`, `box_x`, `box_row`, `winning_row`, `won` | On-chain bet resolution result |
+#### `init` — sent once on connection
 
-### Client → Server (WebSocket)
-
-| `type` | Fields | Description |
-|---|---|---|
-| `register_bet` | `betPda`, `user`, `box_x`, `box_row`, `userAta` | Registers a confirmed bet for server-side watch |
-
-### Client → Server (HTTP)
-
-| Route | Method | Body | Description |
-|---|---|---|---|
-| `/register-bet` | POST | `{betPda, user, box_x, box_row, userAta}` | Same as WS `register_bet` but over HTTP |
-
----
-
-## Frontend Component Architecture
-
-### StockGrid
-
-- Pure canvas component; no DOM elements except one `<div>` and one `<canvas>`
-- All mutable state lives in a single `useRef` (`state.current`) to avoid React re-renders during the animation loop
-- Two separate `useEffect` hooks: one for the WebSocket connection + animation loop, one for mouse event listeners
-- Custom events (`sprmfun:select`, `sprmfun:deselect`) are used to communicate between `StockGrid` and `GameHUD` without shared state or prop drilling
-
-### GameHUD
-
-- Overlays the canvas with `pointer-events: none` except for interactive controls
-- Manages the Anchor `Program` instance after wallet connection
-- Maintains a second WebSocket connection (independent of `StockGrid`) for sending `register_bet`
-- Implements transaction retry logic: resends serialised transactions every 2 s while polling for confirmation (up to 40 attempts / ~40 s)
-
-### GlobalChat
-
-- Connects to PubNub on mount; fetches the last 25 messages via `fetchMessages`
-- Lazy-loads SPRM token balances on sender hover via `getTokenAccountBalance`
-- Chat is silently hidden when PubNub keys are not set
-
-### WalletProvider
-
-- Wraps the tree in `ConnectionProvider → WalletProvider → WalletModalProvider`
-- Hardcodes Phantom as the only wallet adapter
-- RPC endpoint is configurable via `NEXT_PUBLIC_RPC_URL`
-
----
-
-## Anchor Program Architecture
-
-```mermaid
-graph TD
-    subgraph PDAs["Program Derived Addresses"]
-        STATE["State PDA\nseeds: [b'state']"]
-        MINTPDA["Mint PDA\nseeds: [b'mint', state]"]
-        ESCROW["Escrow ATA\nassociated_token(mint, state)"]
-        TREASURY["Treasury ATA\nassociated_token(mint, authority)"]
-        BETPDA["Bet PDA\nseeds: [b'bet', user, box_x_le8, box_row]"]
-    end
-
-    STATE --> MINTPDA
-    STATE --> ESCROW
-    STATE --> BETPDA
-
-    BETPDA -- "place_bet: transfer" --> ESCROW
-    ESCROW -- "resolve_bet (win): transfer" --> USER_ATA["User ATA"]
-    ESCROW -- "resolve_bet (fee): transfer" --> TREASURY
-    MINTPDA -- "faucet: mint_to" --> USER_ATA
+```json
+{
+  "type": "init",
+  "columns": [ { "id": "g12345", "x": 12500, "boxes": [ ... ] } ],
+  "history": [ { "x": 100, "y": 0.12 }, ... ],
+  "currentX": 15000,
+  "price": 54.32,
+  "vrfPaths": { "12500": 247, "13000": 183, ... }
+}
 ```
 
-### Account Sizes
+#### `pointer` — every 33 ms
 
-| Account | Size (bytes) | Calculation |
+```json
+{
+  "type": "pointer",
+  "y": -0.123,
+  "currentX": 15050,
+  "price": 54.35,
+  "microVelocity": 12500,
+  "timestamp": 1710123456789
+}
+```
+
+`y` is normalised to [−1, +1] (maps to [row 0, row 499]).
+`microVelocity` is short-EMA deviation × 1 000 000; used by the client for sub-grid sperm-head animation.
+
+#### `grid` — when new columns are generated
+
+```json
+{
+  "type": "grid",
+  "columns": [
+    {
+      "id": "g12600",
+      "x": 12600,
+      "boxes": [
+        { "id": "b12600-0", "multiplier": 1.23, "mult_num": 123, "mult_den": 100 },
+        ...499 more
+      ]
+    }
+  ]
+}
+```
+
+#### `bet_resolved`
+
+```json
+{
+  "type": "bet_resolved",
+  "betId": "42",
+  "user": "0xAbCd...1234",
+  "won": true,
+  "payout": 24.5,
+  "colX": 12500,
+  "row": 247
+}
+```
+
+#### `bet_receipt` — after on-chain confirmation
+
+```json
+{
+  "type": "bet_receipt",
+  "betId": "42",
+  "txHash": "0xabc...",
+  "won": true
+}
+```
+
+#### `leaderboard`
+
+```json
+{
+  "type": "leaderboard",
+  "entries": [
+    { "address": "0x...", "shortAddr": "Ab12…XYZw", "wins": 14, "losses": 6, "totalBet": 500, "totalPayout": 720 }
+  ]
+}
+```
+
+#### `active_players`
+
+```json
+{
+  "type": "active_players",
+  "players": [
+    { "address": "0x...", "shortAddr": "Ab12…XYZw", "pendingBets": 2, "lastBetAt": 1710123456000 }
+  ],
+  "count": 3
+}
+```
+
+#### `house_bank`
+
+```json
+{ "type": "house_bank", "balance": 987654.32 }
+```
+
+#### `market_paused` / `market_resumed`
+
+```json
+{ "type": "market_paused", "reason": "price_feed_stale" }
+{ "type": "market_resumed" }
+```
+
+#### `vrf_state`
+
+```json
+{
+  "type": "vrf_state",
+  "paths": [
+    { "colX": 12500, "row": 247 },
+    { "colX": 12550, "row": 251 }
+  ]
+}
+```
+
+#### `mult_history`
+
+```json
+{
+  "type": "mult_history",
+  "entries": [ { "colX": 12000, "mult": 3.5 }, ... ]
+}
+```
+
+---
+
+### Client → Server
+
+#### `register_bet` (via HTTP POST, not WebSocket)
+
+```
+POST /register-bet
+Content-Type: application/json
+
+{
+  "betId": "42",
+  "user": "0xAbCd...1234",
+  "box_x": 12500,
+  "box_row": 247,
+  "mult_num": 350,
+  "bet_amount": 10.0
+}
+```
+
+Response: `{ "ok": true }` or `{ "ok": false, "error": "market_paused" }`
+
+#### `ghost_select` (WebSocket)
+
+```json
+{ "type": "ghost_select",   "colX": 12500, "row": 247, "shortAddr": "Ab12…XYZw" }
+{ "type": "ghost_deselect", "colX": 12500, "row": 247, "shortAddr": "Ab12…XYZw" }
+```
+
+Ghost selections are broadcast to all other clients as a social signal of where other players are hovering.
+
+---
+
+## Custom DOM Events (StockGrid ↔ GameHUD)
+
+StockGrid and GameHUD communicate via `window.dispatchEvent` / `window.addEventListener`. This avoids prop-drilling through the page layout.
+
+| Event | Direction | Payload |
 |---|---|---|
-| `State` | 188 | `8 + 32×3 + 2 + 1 + 8 + 32 + 32 + 8 + 1` |
-| `Bet` | 77 | `8 + 32 + 8 + 1 + 8 + 8 + 1 + 1 + 8 + 1` |
+| `sprmfun:select` | StockGrid → GameHUD | `{ colX, row, multiplier, multNum, multDen }` |
+| `sprmfun:deselect` | StockGrid → GameHUD | `{}` |
+| `sprmfun:settings` | BetSidebar → GameHUD | `{ preset, quickBet }` |
+
+---
+
+## Smart Contract Interface
+
+**File:** `avalanche-contracts/contracts/SprmfunGame.sol`
+**Compiler:** Solidity 0.8.24, `evmVersion: cancun`, `viaIR: true`
+
+### Key Functions
+
+```solidity
+// Place a bet — transfers `amount` SPRM from caller to contract
+function placeBet(
+    uint32 boxX,       // Column X pixel coordinate
+    uint16 boxRow,     // Row index (0–499)
+    uint16 multNum,    // Multiplier numerator (e.g. 350 = 3.50×)
+    uint256 amount     // SPRM amount in wei (18 decimals)
+) external returns (uint256 betId)
+
+// Resolve a bet — only callable by resolverSigner
+function resolveBet(
+    uint256 betId,
+    bool won,
+    bytes calldata serverSig  // ECDSA sig over keccak256(betId, won, address(this))
+) external
+
+// Request Chainlink VRF entropy — called by server every 15 columns
+function requestVrf() external returns (uint256 requestId)
+
+// Chainlink callback — automatic, not called directly
+function fulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) internal override
+```
+
+### Key Events
+
+```solidity
+event BetPlaced(uint256 indexed betId, address indexed player, uint32 boxX, uint16 boxRow, uint16 multNum, uint256 amount)
+event BetResolved(uint256 indexed betId, address indexed player, bool won, uint256 payout)
+event VrfRequested(uint256 indexed epochId, uint256 indexed requestId)
+event VrfFulfilled(uint256 indexed epochId, uint256 indexed requestId, bytes32 vrfResult)
+```
+
+---
+
+## Rate Limiting
+
+The `/register-bet` endpoint is rate-limited at **60 requests per minute per IP**.
+
+Implemented with a simple in-memory `Map<ip, { count, resetAt }>` in `server.js`. No external dependency needed.
+
+---
+
+## Feed Staleness Detection
+
+The server checks price feed freshness every tick (10 Hz loop):
+
+```
+if (Date.now() - lastPriceTick > PRICE_STALE_MS) {   // PRICE_STALE_MS = 5000
+    bettingPaused = true
+    broadcast({ type: "market_paused", reason: "price_feed_stale" })
+}
+```
+
+- New bets are rejected with HTTP 503 `{ ok: false, error: "market_paused" }` while paused.
+- Active pending bets resolve against the last valid pointer position when the feed recovers.
+- A grey overlay and "FEED PAUSED" text are rendered on the client canvas.
 
 ---
 
 ## Build Pipeline
 
-```mermaid
-graph LR
-    A["npm install\n(deps stage)"] --> B["next build\n(builder stage)"]
-    B --> C[".next/ output\n+ node_modules"]
-    C --> D["runner stage\n(production image)"]
-    D --> E["npm start\n→ node server.js"]
+```bash
+# Development
+npm run dev       # node server.js → starts Next.js dev server + WS game server
+
+# Production
+npm run build     # next build
+npm run start     # NODE_ENV=production node server.js
+
+# Docker
+docker build -t sprmfun .
+docker run -p 3000:3000 sprmfun
+
+# Profile DB migrations
+npm run migrate:profile   # node scripts/profile-migrate.js
 ```
 
-The `builder` stage sets `NEXT_PUBLIC_*` environment variables so they are baked into the static bundle. Server-side secrets (`ANCHOR_WALLET`, `ANCHOR_PROVIDER_URL`) are **not** baked — they must be supplied at runtime.
+### Dockerfile
 
----
+Multi-stage build:
+1. `deps` — Install `node_modules`
+2. `builder` — Run `next build`
+3. `runner` — Copy `.next/` + `node_modules/`, start `server.js`
 
-## Dependency Graph (key packages)
-
-```mermaid
-graph LR
-    SG["StockGrid.tsx"] --> WJS["@solana/web3.js"]
-    GH["GameHUD.tsx"] --> WJS
-    GH["GameHUD.tsx"] --> ANC["@coral-xyz/anchor"]
-    GH["GameHUD.tsx"] --> SPL["@solana/spl-token"]
-    GH["GameHUD.tsx"] --> WA["@solana/wallet-adapter-react"]
-    GH["GameHUD.tsx"] --> LR["lucide-react"]
-    GC["GlobalChat.tsx"] --> PN["pubnub"]
-    GC["GlobalChat.tsx"] --> SPL
-    GC["GlobalChat.tsx"] --> WA
-    WP["WalletProvider.tsx"] --> WA
-    WP["WalletProvider.tsx"] --> WAW["@solana/wallet-adapter-wallets"]
-    SRV["server.js"] --> WS["ws"]
-    SRV --> ANC
-    SRV --> WJS
-    SRV --> SPL
-```
+Port 3000 is exposed. The WebSocket game server runs on port 3001 internally (same process as Next.js via `server.js`).
