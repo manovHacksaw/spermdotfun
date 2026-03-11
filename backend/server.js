@@ -273,6 +273,26 @@ async function main() {
       });
       return;
     }
+    if (req.method === 'GET' && parsedUrl.pathname === '/debug') {
+      sendJson(res, 200, {
+        ok: true,
+        price: state.currentAvaxPrice,
+        lastPriceTick: state.lastPriceTick,
+        lastPriceTickAge: Date.now() - state.lastPriceTick,
+        bettingPaused: state.bettingPaused,
+        clients: state.clients.size,
+        serverCurrentX: state.serverCurrentX,
+        onchainReady: state.onchainReady,
+        version: '1.0.4-robust-feed'
+      });
+      return;
+    }
+
+    if (req.method === 'GET' && parsedUrl.pathname === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('SPRMFUN Backend is Online. Go to /debug for state.');
+      return;
+    }
 
     sendJson(res, 404, { error: 'Not found' });
   });

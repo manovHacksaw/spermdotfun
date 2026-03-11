@@ -9,7 +9,10 @@ const { state, broadcast } = require('./state');
 // ── REST fallback — poll Binance HTTP API ─────────────────────────────────────
 function fetchPriceRest() {
   const url = 'https://api.binance.com/api/v3/ticker/price?symbol=AVAXUSDT';
-  https.get(url, (res) => {
+  const options = {
+    headers: { 'User-Agent': 'Mozilla/5.0 (SPRMFUN-Server)' }
+  };
+  https.get(url, options, (res) => {
     let body = '';
     res.on('data', chunk => { body += chunk; });
     res.on('end', () => {

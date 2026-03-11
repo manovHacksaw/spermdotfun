@@ -858,8 +858,10 @@ export default function StockGrid() {
           }
 
         } else if (data.type === 'pointer') {
-          s.currentPrice = data.price as number
-          window.dispatchEvent(new CustomEvent('sprmfun:price', { detail: { price: s.currentPrice } }))
+          if (typeof data.price === 'number' && data.price > 0) {
+            s.currentPrice = data.price
+            window.dispatchEvent(new CustomEvent('sprmfun:price', { detail: { price: s.currentPrice } }))
+          }
           s.currentX = data.currentX as number
           s.lastPointerTime = Date.now()
           s.pointerCount++

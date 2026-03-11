@@ -300,7 +300,7 @@ export default function TopHeader({
       <div style={{ flex: 1 }} />
 
       {/* ── AVAX Live price ── */}
-      {avaxPrice !== null && !isTiny && (
+      {avaxPrice !== null && avaxPrice > 0 && !isTiny && (
         <div
           style={{
             display: "flex",
