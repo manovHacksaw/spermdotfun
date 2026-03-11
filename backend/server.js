@@ -7,7 +7,7 @@ const { createProfileService } = require('./lib/server/profile-service');
 
 const { state, broadcast } = require('./state');
 const { initEvm } = require('./evm');
-const { initBinance, checkAndUpdateMarketPause, updateHouseBank } = require('./priceFeed');
+const { initPriceFeed, checkAndUpdateMarketPause, updateHouseBank } = require('./priceFeed');
 const { stepSim, steerTowardRow } = require('./physics');
 const { refreshVrfLocally, subscribeVrfEvents } = require('./vrfManager');
 const { resolveBet, leaderboardPayload, activePlayersPayload, broadcastActivePlayers } = require('./betResolution');
@@ -161,7 +161,6 @@ function registerBet(msg, profileService) {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 async function main() {
-  initBinance();
 
   const profileService = createProfileService({
     logger: console,
@@ -202,6 +201,7 @@ async function main() {
   process.once('SIGTERM', shutdownProfile);
 
   initEvm();
+  initPriceFeed();
   subscribeVrfEvents();
 
   // Seed initial history and columns
