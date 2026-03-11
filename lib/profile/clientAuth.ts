@@ -1,6 +1,7 @@
 'use client'
 
 const AUTH_CACHE_PREFIX = 'sprmfun:profile:auth:v1'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ''
 
 export type SignMessageFn = (message: Uint8Array) => Promise<string>
 
@@ -74,7 +75,7 @@ export async function ensureProfileAccessToken(
   const cached = readCachedSession(walletAddress)
   if (cached) return cached.accessToken
 
-  const challengeResponse = await fetch('/api/profile/auth/challenge', {
+  const challengeResponse = await fetch(`${API_BASE}/api/profile/auth/challenge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ wallet: walletAddress }),
@@ -89,7 +90,7 @@ export async function ensureProfileAccessToken(
 
   const signature = await signMessage(new TextEncoder().encode(message))
 
-  const verifyResponse = await fetch('/api/profile/auth/verify', {
+  const verifyResponse = await fetch(`${API_BASE}/api/profile/auth/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ wallet: walletAddress, nonce, signature }),
